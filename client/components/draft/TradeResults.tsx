@@ -1,0 +1,161 @@
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { getTeamEmoji } from "@/lib/draft-constants";
+import { SEVERITY_COLORS, type VerdictSeverity } from "@/lib/trade-utils";
+
+interface ValuationItem {
+  name: string;
+  value: number;
+  adpUsed: number | null;
+}
+
+interface SideResult {
+  assets: ValuationItem[];
+  totalValue: number;
+}
+
+interface DejaVuMatch {
+  tradeNumber: number;
+  season: string;
+  teamA: string;
+  teamB: string;
+  similarity: number;
+  summary: string;
+}
+
+interface EvalResult {
+  teamASide: SideResult;
+  teamBSide: SideResult;
+  pctDifference: number;
+  winningTeamId: number | null;
+  verdict: { label: string; emoji: string; severity: string };
+  dejaVu: DejaVuMatch[];
+}
+
+interface Props {
+  result: EvalResult;
+  teamAName: string;
+  teamBName: string;
+  teamAColor?: string;
+  teamBColor?: string;
+}
+
+export default function TradeResults({ result, teamAName, teamBName, teamAColor, teamBColor }: Props) {
+  const { teamASide, teamBSide, pctDifference, verdict, dejaVu } = result;
+  const maxValue = Math.max(teamASide.totalValue, teamBSide.totalValue, 1);
+  const teamAProgress = (teamASide.totalValue / maxValue) * 100;
+  const teamBProgress = (teamBSide.totalValue / maxValue) * 100;
+
+  const severity = verdict.severity as VerdictSeverity;
+  const colors = SEVERITY_COLORS[severity] ?? SEVERITY_COLORS.fair;
+  const absDiff = Math.abs(pctDifference);
+  const winnerName = pctDifference > 0 ? teamBName : pctDifference < 0 ? teamAName : null;
+
+  return (
+    <div className="space-y-4 mt-4">
+      {/* Verdict Banner — big and bold */}
+      <div className={`rounded-xl border-2 ${colors.border} ${colors.bg} p-5 text-center relative overflow-hidden`}>
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent" />
+        <div className="relative">
+          <div className="text-4xl mb-2">{verdict.emoji}</div>
+          <div className={`font-extrabold text-2xl ${colors.text}`}>{verdict.label}</div>
+          {absDiff > 5 && winnerName && (
+            <div className="text-sm mt-2 opacity-90">
+              {getTeamEmoji(winnerName)} <span className="font-semibold">{winnerName}</span> wins by{" "}
+              <span className="font-mono font-bold text-lg">{absDiff}%</span>
+            </div>
+          )}
+          {absDiff <= 5 && (
+            <div className="text-sm mt-2 opacity-70">Both sides are within 5% — solid deal for everyone! 🤝</div>
+          )}
+        </div>
+      </div>
+
+      {/* Value Comparison — side by side with team colors */}
+      <div className="grid grid-cols-2 gap-4">
+        <ValueColumn
+          teamName={teamAName}
+          label="receives"
+          side={teamBSide}
+          progress={teamBProgress}
+          accentColor={teamAColor ?? "#3b82f6"}
+          gradientClass="from-blue-600/10"
+          isWinner={pctDifference < -5}
+        />
+        <ValueColumn
+          teamName={teamBName}
+          label="receives"
+          side={teamASide}
+          progress={teamAProgress}
+          accentColor={teamBColor ?? "#ef4444"}
+          gradientClass="from-red-600/10"
+          isWinner={pctDifference > 5}
+        />
+      </div>
+
+      {/* 📡 Deal Déjà Vu */}
+      {dejaVu.length > 0 && (
+        <div className="rounded-xl border border-purple-500/30 bg-purple-500/5 p-4">
+          <h4 className="text-sm font-bold mb-3 flex items-center gap-1.5 text-purple-400">
+            <span className="text-base">📡</span> Deal Déjà Vu
+          </h4>
+          <div className="space-y-2">
+            {dejaVu.map((match, i) => (
+              <div key={i} className="text-xs bg-purple-500/10 rounded-lg p-3 border border-purple-500/20">
+                <div className="font-medium text-purple-300">{match.summary}</div>
+                <div className="text-muted-foreground mt-1">
+                  {getTeamEmoji(match.teamA)} {match.teamA} ↔ {getTeamEmoji(match.teamB)} {match.teamB} • {match.season}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ValueColumn({
+  teamName,
+  label,
+  side,
+  progress,
+  accentColor,
+  gradientClass,
+  isWinner,
+}: {
+  teamName: string;
+  label: string;
+  side: SideResult;
+  progress: number;
+  accentColor: string;
+  gradientClass: string;
+  isWinner: boolean;
+}) {
+  return (
+    <div
+      className={`rounded-xl border bg-gradient-to-b ${gradientClass} to-transparent p-4 space-y-2 ${isWinner ? "border-emerald-500/50 ring-1 ring-emerald-500/20" : "border-border"}`}
+      style={{ borderTopColor: accentColor, borderTopWidth: 3 }}
+    >
+      <div className="text-xs text-muted-foreground">
+        {getTeamEmoji(teamName)} <span className="font-semibold text-foreground">{teamName}</span> {label}
+      </div>
+      <div className="flex items-baseline gap-2">
+        <span className="text-2xl font-extrabold font-mono">{Math.round(side.totalValue).toLocaleString()}</span>
+        <span className="text-xs text-muted-foreground">pts</span>
+        {isWinner && <span className="text-emerald-400 text-sm ml-auto">✅ Winner</span>}
+      </div>
+      <Progress value={progress} className="h-2.5 rounded-full" />
+      <div className="space-y-1 pt-1">
+        {side.assets.map((asset, i) => (
+          <div key={i} className="flex items-center justify-between text-xs bg-background/40 rounded px-2 py-1">
+            <span className="truncate flex-1 font-medium">{asset.name}</span>
+            <Badge variant="secondary" className="ml-1 text-[10px] font-mono px-1.5 font-bold">
+              {Math.round(asset.value).toLocaleString()}
+            </Badge>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
