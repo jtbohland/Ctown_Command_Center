@@ -11,6 +11,7 @@ import {
   type HistoricalAdpRow,
   type VerdictSeverity,
   type TradeValuation,
+  type DynastyContext,
 } from "@/lib/trade-utils";
 
 interface Props {
@@ -19,6 +20,7 @@ interface Props {
   teams: TeamRow[];
   historicalAdp: HistoricalAdpRow[];
   seasons: string[];
+  dynastyCtx?: DynastyContext;
 }
 
 interface EvaluatedTrade {
@@ -29,10 +31,10 @@ interface EvaluatedTrade {
 const VERDICT_ORDER: VerdictSeverity[] = ["robbery", "clear", "slight", "fair"];
 
 const VERDICT_META: Record<VerdictSeverity, { title: string; emoji: string; description: string }> = {
-  robbery: { title: "Highway Robbery", emoji: "🚨", description: "Someone got fleeced! 25%+ value gap" },
-  clear: { title: "Clear Winners", emoji: "🏆", description: "One side came out significantly ahead (15–25%)" },
-  slight: { title: "Slight Edge", emoji: "📈", description: "Close, but one side got a little more (5–15%)" },
-  fair: { title: "Fair Trades", emoji: "⚖️", description: "Both sides walked away happy (within 5%)" },
+  robbery: { title: "Flag on the Play", emoji: "🚩", description: "Someone got fleeced! 25%+ value gap" },
+  clear: { title: "Pick Six", emoji: "🏆", description: "One side came out significantly ahead (15–25%)" },
+  slight: { title: "Edge Rush", emoji: "📈", description: "Close, but one side got a little more (5–15%)" },
+  fair: { title: "Fair Catch", emoji: "🧤", description: "Both sides walked away happy (within 5%)" },
 };
 
 // ─── Small sub-components ─────────────────────────────────────
@@ -50,10 +52,18 @@ function AssetChip({ a }: { a: TradeAssetRow }) {
       <span className="truncate">
         {a.asset_type === "player"
           ? a.player_name
-          : `${a.pick_year} Rd ${a.pick_round}${a.pick_number ? ` #${a.pick_number}` : ""}`}
+          : formatPickDisplay(a)}
       </span>
     </div>
   );
+}
+
+function formatPickDisplay(a: TradeAssetRow): string {
+  const parts: string[] = [];
+  if (a.pick_year) parts.push(String(a.pick_year));
+  if (a.pick_round) parts.push(`Rd ${a.pick_round}`);
+  if (a.pick_number) parts.push(`#${a.pick_number}`);
+  return parts.length > 0 ? parts.join(" ") : "Draft Pick";
 }
 
 // ─── Trade of the Season card ─────────────────────────────────
@@ -95,10 +105,10 @@ function TradeOfSeasonCard({ label, emoji, et, assets, expandedId, onToggle }: {
         {/* Teams row */}
         <div className="flex items-center gap-1.5 text-xs">
           <span>{getTeamEmoji(trade.team_a_name)}</span>
-          <span className="font-semibold truncate max-w-[70px]">{trade.team_a_name.split(" ")[0]}</span>
+          <span className="font-semibold truncate">{trade.team_a_name}</span>
           <span className="text-muted-foreground">↔</span>
           <span>{getTeamEmoji(trade.team_b_name)}</span>
-          <span className="font-semibold truncate max-w-[70px]">{trade.team_b_name.split(" ")[0]}</span>
+          <span className="font-semibold truncate">{trade.team_b_name}</span>
           {valuation.winningTeamName && (
             <Badge className={`ml-auto text-[9px] px-1.5 py-0 ${colors.badge} border`}>
               {getTeamEmoji(valuation.winningTeamName)} +{Math.abs(valuation.pctDifference)}%
@@ -141,7 +151,7 @@ function TradeOfSeasonCard({ label, emoji, et, assets, expandedId, onToggle }: {
 
 // ─── Main Component ───────────────────────────────────────────
 
-export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seasons }: Props) {
+export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seasons, dynastyCtx }: Props) {
   const [expandedTrade, setExpandedTrade] = useState<number | null>(null);
   const [selectedSeason, setSelectedSeason] = useState<string>("all");
   const [activeFilters, setActiveFilters] = useState<Set<VerdictSeverity>>(new Set(VERDICT_ORDER));
@@ -164,9 +174,9 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
   const evaluated = useMemo<EvaluatedTrade[]>(() => {
     return filteredTrades.map((trade) => ({
       trade,
-      valuation: evaluateHistoricalTrade(trade, assets, adpMap),
+      valuation: evaluateHistoricalTrade(trade, assets, adpMap, dynastyCtx),
     }));
-  }, [filteredTrades, assets, adpMap]);
+  }, [filteredTrades, assets, adpMap, dynastyCtx]);
 
   // Group by severity
   const grouped = useMemo(() => {
@@ -192,11 +202,16 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
 
   // Trade of the Season — biggest robbery, biggest non-robbery winner, most even
   const featuredTrades = useMemo<FeaturedTrade[]>(() => {
-    const allSorted = [...evaluated].sort(
+    // Only consider trades that include at least one player (no pick-for-pick only)
+    const tradesWithPlayers = evaluated.filter((et) => {
+      const tradeAssets = assets.filter((a) => a.trade_id === et.trade.id);
+      return tradeAssets.some((a) => a.asset_type === "player");
+    });
+    const allSorted = [...tradesWithPlayers].sort(
       (a, b) => Math.abs(b.valuation.pctDifference) - Math.abs(a.valuation.pctDifference)
     );
     const mostLopsided = allSorted[0];
-    const mostEven = [...evaluated].sort(
+    const mostEven = [...tradesWithPlayers].sort(
       (a, b) => Math.abs(a.valuation.pctDifference) - Math.abs(b.valuation.pctDifference)
     )[0];
     const results: FeaturedTrade[] = [];
@@ -375,7 +390,7 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
                   </span>
                   <div className="flex items-center gap-1 min-w-0">
                     <span>{getTeamEmoji(row.name)}</span>
-                    <span className="truncate font-medium">{row.name.split(" ").slice(0, 2).join(" ")}</span>
+                    <span className="truncate font-medium">{row.name}</span>
                     <span className="text-[9px] font-mono text-muted-foreground ml-1">{winRate}%</span>
                   </div>
                   <span className="text-center font-mono font-bold text-emerald-400">{row.wins}</span>
@@ -428,12 +443,12 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
                       <span className="font-mono text-muted-foreground w-6 text-[10px]">#{trade.trade_number}</span>
                       <span className="flex items-center gap-1 min-w-[90px]">
                         {getTeamEmoji(trade.team_a_name)}
-                        <span className="truncate max-w-[70px] font-medium">{trade.team_a_name.split(" ")[0]}</span>
+                        <span className="truncate font-medium">{trade.team_a_name}</span>
                       </span>
                       <span className="text-muted-foreground text-[10px]">↔</span>
                       <span className="flex items-center gap-1 min-w-[90px]">
                         {getTeamEmoji(trade.team_b_name)}
-                        <span className="truncate max-w-[70px] font-medium">{trade.team_b_name.split(" ")[0]}</span>
+                        <span className="truncate font-medium">{trade.team_b_name}</span>
                       </span>
                       {valuation.winningTeamName ? (
                         <span className={`text-[10px] font-bold ml-auto ${colors.text}`}>

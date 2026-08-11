@@ -58,11 +58,20 @@ const HistoricalAdpSchema = z.object({
   player_name: z.string(),
   adp_rank: z.coerce.number(),
   season: z.string(),
+  position: z.string(),
+});
+
+const RookieClassSchema = z.object({
+  nfl_draft_year: z.coerce.number(),
+  overall_pick: z.coerce.number(),
+  player_name: z.string(),
+  position: z.string(),
+  age_on_draft_day: z.coerce.number(),
 });
 
 export default api({
   name: "GetTradeData",
-  description: "Fetches all trade data, draft capital, players, and teams for the Arm Chair Dealer.",
+  description: "Fetches all trade data, draft capital, players, teams, ADP, and rookie classes.",
 
   integrations: {
     apps_db: postgres(APPS_DB),
@@ -77,6 +86,7 @@ export default api({
     players: z.array(PlayerSchema),
     teams: z.array(TeamSchema),
     historicalAdp: z.array(HistoricalAdpSchema),
+    rookieClasses: z.array(RookieClassSchema),
   }),
 
   async run(ctx) {
@@ -134,12 +144,26 @@ export default api({
     );
 
     const historicalAdp = await ctx.integrations.apps_db.query(
-      `SELECT player_name, adp_rank, season FROM ffwr_historical_adp ORDER BY season, adp_rank LIMIT 300`,
+      `SELECT player_name, adp_rank, season, position FROM ffwr_historical_adp ORDER BY season, adp_rank LIMIT 300`,
       HistoricalAdpSchema,
       undefined,
-      { label: "Fetch historical ADP" }
+      { label: "Fetch historical ADP with positions" }
     );
 
-    return { trades, assets, draftCapital, players, teams, historicalAdp };
+    // Fetch rookie classes for dynasty factors (safe if table doesn't exist yet)
+    let rookieClasses: z.infer<typeof RookieClassSchema>[] = [];
+    try {
+      rookieClasses = await ctx.integrations.apps_db.query(
+        `SELECT nfl_draft_year, overall_pick, player_name, position, age_on_draft_day
+         FROM ffwr_rookie_classes ORDER BY nfl_draft_year, overall_pick LIMIT 1000`,
+        RookieClassSchema,
+        undefined,
+        { label: "Fetch rookie classes" }
+      );
+    } catch {
+      ctx.log.warn("ffwr_rookie_classes table not found — run SeedRookieClasses first");
+    }
+
+    return { trades, assets, draftCapital, players, teams, historicalAdp, rookieClasses };
   },
 });

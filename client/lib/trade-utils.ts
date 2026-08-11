@@ -14,6 +14,18 @@ const YEAR_DISCOUNT: Record<number, number> = {
   2028: 0.65,
 };
 
+// ─── Dynasty Multiplier Constants ────────────────────────────
+const ROOKIE_PREMIUM = 1.10;      // Top-50 NFL draft picks in their rookie season
+const POSITIONAL_SCARCITY = 1.08; // Top-5 QB or TE by ADP
+// Age curve factors
+function getAgeFactor(age: number): number {
+  if (age <= 24) return 1.06;
+  if (age <= 27) return 1.03;
+  if (age <= 29) return 1.00;
+  if (age <= 31) return 0.95;
+  return 0.90;
+}
+
 export function calcPlayerValue(adpRank: number): number {
   if (adpRank <= 0) return 0;
   return BASE_VALUE * Math.pow(1 / adpRank, POWER);
@@ -25,8 +37,6 @@ export function calcPickValue(round: number, year: number, pickInRound?: number)
   const draftPosition = pickInRound
     ? startOfRound + pickInRound - 1
     : (startOfRound + endOfRound) / 2;
-  // In a 4-keeper league, the 44 best players are already rostered.
-  // A 1.01 pick targets the 45th-best player, not the 1st.
   const effectiveAdp = draftPosition + KEEPER_OFFSET;
   const discount = YEAR_DISCOUNT[year] ?? 0.5;
   return calcPlayerValue(effectiveAdp) * discount;
@@ -42,10 +52,10 @@ export interface Verdict {
 
 export function getVerdict(pctDiff: number): Verdict {
   const absDiff = Math.abs(pctDiff);
-  if (absDiff <= 5) return { label: "Fair Trade", emoji: "⚖️", severity: "fair" };
-  if (absDiff <= 15) return { label: "Slight Edge", emoji: "📈", severity: "slight" };
-  if (absDiff <= 25) return { label: "Clear Winner", emoji: "🏆", severity: "clear" };
-  return { label: "Highway Robbery", emoji: "🚨", severity: "robbery" };
+  if (absDiff <= 5) return { label: "Fair Catch", emoji: "🧤", severity: "fair" };
+  if (absDiff <= 15) return { label: "Edge Rush", emoji: "📈", severity: "slight" };
+  if (absDiff <= 25) return { label: "Pick Six", emoji: "🏆", severity: "clear" };
+  return { label: "Flag on the Play", emoji: "🚩", severity: "robbery" };
 }
 
 export const SEVERITY_COLORS: Record<VerdictSeverity, { bg: string; border: string; text: string; badge: string }> = {
@@ -112,6 +122,20 @@ export interface HistoricalAdpRow {
   player_name: string;
   adp_rank: number;
   season: string;
+  position: string;
+}
+
+export interface RookieClassEntry {
+  nfl_draft_year: number;
+  overall_pick: number;
+  player_name: string;
+  position: string;
+  age_on_draft_day: number;
+}
+
+export interface DynastyContext {
+  rookieClasses: RookieClassEntry[];
+  allAdp: HistoricalAdpRow[];
 }
 
 export interface TradeValuation {
@@ -123,13 +147,60 @@ export interface TradeValuation {
   winningTeamName: string | null;
 }
 
+// ─── Dynasty Multiplier Helper ───────────────────────────────
+function applyDynastyMultiplier(
+  baseValue: number,
+  playerName: string,
+  playerPosition: string | null,
+  playerAdp: number | null,
+  tradeSeason: string,
+  ctx: DynastyContext,
+): number {
+  let multiplier = 1.0;
+  const nameLower = playerName.toLowerCase();
+  // Season "2024-25" → draft year 2024
+  const draftYear = parseInt(tradeSeason.split("-")[0]);
+
+  // 1. Rookie premium: player in this year's NFL draft class, pick ≤ 50
+  const isRookie = ctx.rookieClasses.some(
+    (r) =>
+      r.nfl_draft_year === draftYear &&
+      r.overall_pick <= 50 &&
+      r.player_name.toLowerCase() === nameLower,
+  );
+  if (isRookie) multiplier *= ROOKIE_PREMIUM;
+
+  // 2. Positional scarcity: top-5 QB or TE by ADP in that season
+  const pos = playerPosition?.toUpperCase() ?? "";
+  if ((pos === "QB" || pos === "TE") && playerAdp !== null) {
+    const seasonAdp = ctx.allAdp
+      .filter((a) => a.season === tradeSeason && a.position.toUpperCase() === pos)
+      .sort((a, b) => a.adp_rank - b.adp_rank);
+    const posRank = seasonAdp.findIndex((a) => a.player_name.toLowerCase() === nameLower);
+    if (posRank >= 0 && posRank < 5) multiplier *= POSITIONAL_SCARCITY;
+  }
+
+  // 3. Age curve: compute current age from rookie class data
+  const rookieEntry = ctx.rookieClasses.find(
+    (r) => r.player_name.toLowerCase() === nameLower,
+  );
+  if (rookieEntry) {
+    const currentAge = rookieEntry.age_on_draft_day + (draftYear - rookieEntry.nfl_draft_year);
+    const ageFactor = getAgeFactor(currentAge);
+    multiplier *= ageFactor;
+  }
+
+  return baseValue * multiplier;
+}
+
 /**
- * Compute valuation for a historical trade using ADP data.
+ * Compute valuation for a historical trade using ADP data + optional dynasty factors.
  */
 export function evaluateHistoricalTrade(
   trade: TradeRow,
   assets: TradeAssetRow[],
-  adpMap: Map<string, number>
+  adpMap: Map<string, number>,
+  dynastyCtx?: DynastyContext,
 ): TradeValuation {
   const tradeAssets = assets.filter((a) => a.trade_id === trade.id);
   const teamAAssets = tradeAssets.filter((a) => a.from_team_id === trade.team_a_id);
@@ -141,7 +212,19 @@ export function evaluateHistoricalTrade(
         const adp = a.player_adp_at_trade
           ? Number(a.player_adp_at_trade)
           : adpMap.get((a.player_name ?? "").toLowerCase()) ?? null;
-        return sum + (adp ? calcPlayerValue(adp) : 0);
+        let value = adp ? calcPlayerValue(adp) : 0;
+        // Apply dynasty multipliers if context provided
+        if (dynastyCtx && a.player_name && value > 0) {
+          value = applyDynastyMultiplier(
+            value,
+            a.player_name,
+            a.player_position,
+            adp,
+            trade.season,
+            dynastyCtx,
+          );
+        }
+        return sum + value;
       } else {
         const year = a.pick_year ?? 2026;
         const round = a.pick_round ?? 6;
@@ -161,7 +244,6 @@ export function evaluateHistoricalTrade(
   let winningTeamId: number | null = null;
   let winningTeamName: string | null = null;
   if (Math.abs(pctDifference) > 5) {
-    // Team A gives more value = Team B RECEIVES more = Team B wins
     if (pctDifference > 0) {
       winningTeamId = trade.team_b_id;
       winningTeamName = trade.team_b_name;

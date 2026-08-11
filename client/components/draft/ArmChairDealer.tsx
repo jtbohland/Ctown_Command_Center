@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from "react";
+import type { DynastyContext } from "@/lib/trade-utils";
 import { useApiData } from "@/hooks/useApiData";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -55,7 +56,13 @@ export default function ArmChairDealer() {
     );
   }
 
-  const { trades, assets, draftCapital, players, teams, historicalAdp } = data!;
+  const { trades, assets, draftCapital, players, teams, historicalAdp, rookieClasses } = data!;
+
+  // Build dynasty context for historical trade evaluation
+  const dynastyCtx: DynastyContext | undefined = useMemo(() => {
+    if (!rookieClasses || rookieClasses.length === 0) return undefined;
+    return { rookieClasses, allAdp: historicalAdp };
+  }, [rookieClasses, historicalAdp]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -93,11 +100,11 @@ export default function ArmChairDealer() {
         </TabsContent>
 
         <TabsContent value="history" className="flex-1 overflow-auto px-5 py-4">
-          <TradeHistory trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} />
+          <TradeHistory trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} dynastyCtx={dynastyCtx} />
         </TabsContent>
 
         <TabsContent value="gbu" className="flex-1 overflow-auto px-5 py-4">
-          <GoodBadUgly trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} />
+          <GoodBadUgly trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} dynastyCtx={dynastyCtx} />
         </TabsContent>
 
         <TabsContent value="siren" className="flex-1 overflow-auto px-5 py-4">

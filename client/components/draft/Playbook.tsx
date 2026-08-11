@@ -110,10 +110,22 @@ export default function Playbook() {
           </div>
 
           <div className="grid grid-cols-2 gap-2 mt-2">
-            <VerdictExplainer emoji="⚖️" label="Fair Trade" range="0-5%" color="text-emerald-400" description="Both sides are balanced" />
-            <VerdictExplainer emoji="📈" label="Slight Edge" range="5-15%" color="text-amber-400" description="One side got a little more" />
-            <VerdictExplainer emoji="🏆" label="Clear Winner" range="15-25%" color="text-orange-400" description="Notably lopsided" />
-            <VerdictExplainer emoji="🚨" label="Highway Robbery" range="25%+" color="text-red-400" description="Someone got fleeced" />
+            <VerdictExplainer emoji="🧤" label="Fair Catch" range="0-5%" color="text-emerald-400" description="Both sides are balanced" />
+            <VerdictExplainer emoji="📈" label="Edge Rush" range="5-15%" color="text-amber-400" description="One side got a little more" />
+            <VerdictExplainer emoji="🏆" label="Pick Six" range="15-25%" color="text-orange-400" description="Notably lopsided" />
+            <VerdictExplainer emoji="🚩" label="Flag on the Play" range="25%+" color="text-red-400" description="Someone got fleeced" />
+          </div>
+
+          <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3 mt-3">
+            <div className="text-xs font-bold text-purple-400 mb-1">🏈 Dynasty Multipliers</div>
+            <p className="text-xs mb-2">
+              After base value is calculated, dynasty-relevant factors apply multipliers:
+            </p>
+            <div className="space-y-1 text-xs font-mono">
+              <div><span className="text-purple-400">Rookie premium:</span> 1.10× — top-50 NFL draft pick in their rookie season</div>
+              <div><span className="text-pink-400">Positional scarcity:</span> 1.08× — top-5 QB or TE by ADP (hardest to replace)</div>
+              <div><span className="text-cyan-400">Age curve:</span> ≤24 → 1.06× · 25-27 → 1.03× · 28-29 → 1.00× · 30-31 → 0.95× · 32+ → 0.90×</div>
+            </div>
           </div>
 
           <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3 mt-3">

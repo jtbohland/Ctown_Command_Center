@@ -222,12 +222,18 @@ export default function TradeBuilder({ players, teams, draftCapital }: Props) {
             <div><span className="text-muted-foreground">Pick 1.01 → ADP 45 · Pick 2.01 → ADP 56 · Pick 3.01 → ADP 67</span></div>
             <div><span className="text-muted-foreground">Year discount: 2026 → 1.0× · 2027 → 0.8× · 2028 → 0.65×</span></div>
           </div>
+          <div className="rounded-lg bg-background/60 border border-border/40 p-3 space-y-1.5 text-[10px] font-mono">
+            <div className="text-[11px] font-sans font-bold text-foreground mb-1">🏈 Dynasty Multipliers</div>
+            <div><span className="text-purple-400">Rookie premium:</span> 1.10× — top-50 NFL pick in their draft year</div>
+            <div><span className="text-pink-400">Positional scarcity:</span> 1.08× — top-5 QB or TE by ADP</div>
+            <div><span className="text-cyan-400">Age curve:</span> ≤24 → 1.06× · 25-27 → 1.03× · 28-29 → 1.00× · 30-31 → 0.95× · 32+ → 0.90×</div>
+          </div>
           <div className="grid grid-cols-2 gap-2">
             {[
-              { emoji: "⚖️", label: "Fair Trade", desc: "Within 5% — both sides happy" },
-              { emoji: "📈", label: "Slight Edge", desc: "5–15% gap — one side wins" },
-              { emoji: "🏆", label: "Clear Winner", desc: "15–25% gap — significant advantage" },
-              { emoji: "🚨", label: "Highway Robbery", desc: "25%+ gap — someone got fleeced" },
+              { emoji: "🧤", label: "Fair Catch", desc: "Within 5% — both sides happy" },
+              { emoji: "📈", label: "Edge Rush", desc: "5–15% gap — one side wins" },
+              { emoji: "🏆", label: "Pick Six", desc: "15–25% gap — significant advantage" },
+              { emoji: "🚩", label: "Flag on the Play", desc: "25%+ gap — someone got fleeced" },
             ].map((v) => (
               <div key={v.label} className="flex items-start gap-1.5 bg-muted/20 rounded-lg px-2.5 py-2">
                 <span className="text-base leading-none">{v.emoji}</span>

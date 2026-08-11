@@ -6,9 +6,19 @@ const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 const BASE_VALUE = 10000;
 const POWER = 0.6;
 const TOTAL_TEAMS = 11;
-const ROUNDS_PER_DRAFT = 11;
 const KEEPERS_PER_TEAM = 4;
-const KEEPER_OFFSET = TOTAL_TEAMS * KEEPERS_PER_TEAM; // 44 players locked on rosters before draft
+const KEEPER_OFFSET = TOTAL_TEAMS * KEEPERS_PER_TEAM; // 44
+
+// ─── Dynasty Multiplier Constants ───────────────────────────
+const ROOKIE_PREMIUM = 1.10;
+const POSITIONAL_SCARCITY = 1.08;
+function getAgeFactor(age: number): number {
+  if (age <= 24) return 1.06;
+  if (age <= 27) return 1.03;
+  if (age <= 29) return 1.00;
+  if (age <= 31) return 0.95;
+  return 0.90;
+}
 
 // Future pick discount factors
 const YEAR_DISCOUNT: Record<number, number> = {
@@ -17,26 +27,20 @@ const YEAR_DISCOUNT: Record<number, number> = {
   2028: 0.65,
 };
 
-// Expected ADP range by round (11 teams per round)
-// In a 4-keeper league, 44 players are already rostered.
-// Round 1 picks target players 45-55, Round 2 targets 56-66, etc.
 function pickToExpectedAdp(round: number, pickInRound?: number): number {
   const startOfRound = (round - 1) * TOTAL_TEAMS + 1;
   const endOfRound = round * TOTAL_TEAMS;
   const draftPosition = pickInRound
     ? startOfRound + pickInRound - 1
     : (startOfRound + endOfRound) / 2;
-  // Shift by keeper offset: 1.01 = 45th best player, not 1st
   return draftPosition + KEEPER_OFFSET;
 }
 
-// Core value formula: 10000 × (1/rank)^0.6
 function calcValue(adpRank: number): number {
   if (adpRank <= 0) return 0;
   return BASE_VALUE * Math.pow(1 / adpRank, POWER);
 }
 
-// Verdict thresholds
 function getVerdict(pctDiff: number): { label: string; emoji: string; severity: string } {
   const absDiff = Math.abs(pctDiff);
   if (absDiff <= 5) return { label: "Fair Trade", emoji: "⚖️", severity: "fair" };
@@ -59,6 +63,7 @@ const ValuationSchema = z.object({
   name: z.string(),
   value: z.number(),
   adpUsed: z.number().nullable(),
+  dynastyFactors: z.array(z.string()),
 });
 
 const SideResultSchema = z.object({
@@ -78,11 +83,20 @@ const DejaVuSchema = z.object({
 const AdpRowSchema = z.object({
   player_name: z.string(),
   adp_rank: z.coerce.number(),
+  position: z.string(),
+});
+
+const RookieSchema = z.object({
+  player_name: z.string(),
+  nfl_draft_year: z.coerce.number(),
+  overall_pick: z.coerce.number(),
+  age_on_draft_day: z.coerce.number(),
+  position: z.string(),
 });
 
 export default api({
   name: "EvaluateTrade",
-  description: "Evaluates a proposed trade using the power-law valuation engine.",
+  description: "Evaluates a proposed trade using power-law valuation with dynasty multipliers.",
 
   integrations: {
     apps_db: postgres(APPS_DB),
@@ -109,14 +123,91 @@ export default api({
   }),
 
   async run(ctx, { teamAId, teamBId, teamAGives, teamBGives }) {
-    // Get current season ADP for player lookups
+    // Get current season ADP with positions
     const currentAdp = await ctx.integrations.apps_db.query(
-      `SELECT player_name, adp_rank FROM ffwr_historical_adp WHERE season = '2025-26' LIMIT 200`,
+      `SELECT player_name, adp_rank, position FROM ffwr_historical_adp WHERE season = '2025-26' ORDER BY adp_rank LIMIT 300`,
       AdpRowSchema,
       undefined,
-      { label: "Fetch current ADP for valuation" }
+      { label: "Fetch current ADP with positions" }
     );
     const adpMap = new Map(currentAdp.map((p) => [p.player_name.toLowerCase(), p.adp_rank]));
+
+    // Build position → sorted ADP lists for scarcity check
+    const positionAdpMap = new Map<string, { name: string; adp: number }[]>();
+    for (const p of currentAdp) {
+      const pos = p.position.toUpperCase();
+      if (!positionAdpMap.has(pos)) positionAdpMap.set(pos, []);
+      positionAdpMap.get(pos)!.push({ name: p.player_name.toLowerCase(), adp: p.adp_rank });
+    }
+    // Sort each position list by ADP
+    for (const list of positionAdpMap.values()) {
+      list.sort((a, b) => a.adp - b.adp);
+    }
+
+    // Get rookie classes for dynasty factors
+    let rookieClasses: z.infer<typeof RookieSchema>[] = [];
+    try {
+      rookieClasses = await ctx.integrations.apps_db.query(
+        `SELECT player_name, nfl_draft_year, overall_pick, age_on_draft_day, position
+         FROM ffwr_rookie_classes LIMIT 1000`,
+        RookieSchema,
+        undefined,
+        { label: "Fetch rookie classes for dynasty factors" }
+      );
+    } catch {
+      // Table may not exist yet — dynasty factors just won't apply
+      ctx.log.warn("ffwr_rookie_classes not found — dynasty factors skipped");
+    }
+
+    const CURRENT_DRAFT_YEAR = 2025;
+
+    // Dynasty multiplier helper
+    function applyDynasty(
+      baseValue: number,
+      playerName: string,
+      playerPosition: string | null,
+      playerAdp: number | null,
+    ): { value: number; factors: string[] } {
+      if (rookieClasses.length === 0) return { value: baseValue, factors: [] };
+
+      let multiplier = 1.0;
+      const factors: string[] = [];
+      const nameLower = playerName.toLowerCase();
+      const pos = playerPosition?.toUpperCase() ?? "";
+
+      // 1. Rookie premium
+      const isRookie = rookieClasses.some(
+        (r) => r.nfl_draft_year === CURRENT_DRAFT_YEAR && r.overall_pick <= 50 && r.player_name.toLowerCase() === nameLower,
+      );
+      if (isRookie) {
+        multiplier *= ROOKIE_PREMIUM;
+        factors.push("Rookie +10%");
+      }
+
+      // 2. Positional scarcity: top 5 QB/TE
+      if ((pos === "QB" || pos === "TE") && playerAdp !== null) {
+        const posList = positionAdpMap.get(pos) ?? [];
+        const rank = posList.findIndex((p) => p.name === nameLower);
+        if (rank >= 0 && rank < 5) {
+          multiplier *= POSITIONAL_SCARCITY;
+          factors.push(`${pos}${rank + 1} Scarcity +8%`);
+        }
+      }
+
+      // 3. Age curve
+      const rookieEntry = rookieClasses.find((r) => r.player_name.toLowerCase() === nameLower);
+      if (rookieEntry) {
+        const currentAge = rookieEntry.age_on_draft_day + (CURRENT_DRAFT_YEAR - rookieEntry.nfl_draft_year);
+        const ageFactor = getAgeFactor(currentAge);
+        if (ageFactor !== 1.0) {
+          multiplier *= ageFactor;
+          const pct = Math.round((ageFactor - 1) * 100);
+          factors.push(`Age ${currentAge} ${pct >= 0 ? "+" : ""}${pct}%`);
+        }
+      }
+
+      return { value: baseValue * multiplier, factors };
+    }
 
     // Evaluate one side
     function evaluateSide(assets: z.infer<typeof AssetInputSchema>[]): z.infer<typeof SideResultSchema> {
@@ -125,26 +216,21 @@ export default api({
       for (const asset of assets) {
         if (asset.type === "player") {
           const name = asset.playerName ?? "Unknown";
-          // Use provided ADP, or look up from historical data
           let adp = asset.playerAdp ?? null;
-          if (!adp) {
-            adp = adpMap.get(name.toLowerCase()) ?? null;
-          }
-          const value = adp ? calcValue(adp) : 0;
-          valuations.push({ name, value, adpUsed: adp });
+          if (!adp) adp = adpMap.get(name.toLowerCase()) ?? null;
+          const rawValue = adp ? calcValue(adp) : 0;
+          const { value, factors } = applyDynasty(rawValue, name, asset.playerPosition ?? null, adp);
+          valuations.push({ name, value, adpUsed: adp, dynastyFactors: factors });
         } else {
-          // Pick valuation
           const year = asset.pickYear ?? 2026;
-          const round = asset.pickRound ?? 6; // Default to mid-round if unknown
+          const round = asset.pickRound ?? 6;
           const pickNum = asset.pickNumber ?? undefined;
           const expectedAdp = pickToExpectedAdp(round, pickNum);
           const discount = YEAR_DISCOUNT[year] ?? 0.5;
           const rawValue = calcValue(expectedAdp);
           const value = rawValue * discount;
-          const pickLabel = pickNum
-            ? `${year} Rd ${round} Pick ${pickNum}`
-            : `${year} Rd ${round}`;
-          valuations.push({ name: pickLabel, value, adpUsed: expectedAdp });
+          const pickLabel = pickNum ? `${year} Rd ${round} Pick ${pickNum}` : `${year} Rd ${round}`;
+          valuations.push({ name: pickLabel, value, adpUsed: expectedAdp, dynastyFactors: [] });
         }
       }
 
@@ -157,13 +243,11 @@ export default api({
     const teamASide = evaluateSide(teamAGives);
     const teamBSide = evaluateSide(teamBGives);
 
-    // Calculate percentage difference (positive means Team B wins)
     const avgValue = (teamASide.totalValue + teamBSide.totalValue) / 2;
     const pctDifference = avgValue > 0
       ? ((teamBSide.totalValue - teamASide.totalValue) / avgValue) * 100
       : 0;
 
-    // Who wins? If Team A gives MORE value, Team B wins (they receive more)
     let winningTeamId: number | null = null;
     if (Math.abs(pctDifference) > 5) {
       winningTeamId = pctDifference > 0 ? teamBId : teamAId;
@@ -171,8 +255,7 @@ export default api({
 
     const verdict = getVerdict(pctDifference);
 
-    // ── 📡 Deal Déjà Vu — find similar historical trades ──
-    // Look for trades involving the same players or similar pick configurations
+    // ── Deal Déjà Vu ──
     const playerNamesInTrade = [
       ...teamAGives.filter((a) => a.type === "player").map((a) => a.playerName?.toLowerCase()),
       ...teamBGives.filter((a) => a.type === "player").map((a) => a.playerName?.toLowerCase()),
@@ -181,7 +264,6 @@ export default api({
     const dejaVu: z.infer<typeof DejaVuSchema>[] = [];
 
     if (playerNamesInTrade.length > 0) {
-      // Find trades involving any of the same players
       const TradeMatchSchema = z.object({
         trade_id: z.coerce.number(),
         trade_number: z.coerce.number(),

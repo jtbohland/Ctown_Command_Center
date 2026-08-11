@@ -4,12 +4,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
 import {
   evaluateHistoricalTrade,
+  calcPlayerValue,
+  calcPickValue,
   SEVERITY_COLORS,
   type TradeRow,
   type TradeAssetRow,
   type TeamRow,
   type HistoricalAdpRow,
   type VerdictSeverity,
+  type DynastyContext,
 } from "@/lib/trade-utils";
 
 interface Props {
@@ -18,11 +21,12 @@ interface Props {
   teams: TeamRow[];
   historicalAdp: HistoricalAdpRow[];
   seasons: string[];
+  dynastyCtx?: DynastyContext;
 }
 
 const ITEMS_PER_PAGE = 20;
 
-export default function TradeHistory({ trades, assets, teams, historicalAdp, seasons }: Props) {
+export default function TradeHistory({ trades, assets, teams, historicalAdp, seasons, dynastyCtx }: Props) {
   const [seasonFilter, setSeasonFilter] = useState<string>("all");
   const [page, setPage] = useState(0);
   const [expandedTrade, setExpandedTrade] = useState<number | null>(null);
@@ -38,9 +42,9 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
   const tradesWithVerdicts = useMemo(() => {
     return trades.map((trade) => ({
       trade,
-      valuation: evaluateHistoricalTrade(trade, assets, adpMap),
+      valuation: evaluateHistoricalTrade(trade, assets, adpMap, dynastyCtx),
     }));
-  }, [trades, assets, adpMap]);
+  }, [trades, assets, adpMap, dynastyCtx]);
 
   const filteredTrades = useMemo(() => {
     if (seasonFilter === "all") return tradesWithVerdicts;
@@ -76,10 +80,9 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
       </div>
 
       {/* Column Headers */}
-      <div className="grid grid-cols-[40px_100px_60px_1fr_1fr_90px_100px_80px] gap-2 px-3 py-2 bg-muted/30 rounded-lg border border-border/50 text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+      <div className="grid grid-cols-[40px_130px_1fr_1fr_80px_100px_80px] gap-3 px-3 py-2 bg-muted/30 rounded-lg border border-border/50 text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
         <span>#</span>
         <span>Verdict</span>
-        <span className="text-center">Result</span>
         <span>Team A</span>
         <span>Team B</span>
         <span className="text-center">Diff</span>
@@ -95,20 +98,10 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
           const isExpanded = expandedTrade === trade.id;
           const absDiff = Math.abs(valuation.pctDifference);
 
-          // Determine winner/loser
-          let resultBadge: { label: string; className: string };
-          if (absDiff <= 5) {
-            resultBadge = { label: "EVEN", className: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" };
-          } else if (valuation.winningTeamId === trade.team_a_id) {
-            resultBadge = { label: "A WINS", className: "bg-blue-500/20 text-blue-400 border-blue-500/30" };
-          } else {
-            resultBadge = { label: "B WINS", className: "bg-red-500/20 text-red-400 border-red-500/30" };
-          }
-
           return (
             <div key={trade.id}>
               <div
-                className={`grid grid-cols-[40px_100px_60px_1fr_1fr_90px_100px_80px] gap-2 items-center px-3 py-2.5 rounded-lg border cursor-pointer transition-all ${
+                className={`grid grid-cols-[40px_130px_1fr_1fr_80px_100px_80px] gap-3 items-center px-3 py-2.5 rounded-lg border cursor-pointer transition-all ${
                   isExpanded
                     ? `${colors.border} ${colors.bg}`
                     : "border-border/40 hover:border-border hover:bg-muted/20"
@@ -119,27 +112,29 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
                 <span className="text-[11px] font-mono text-muted-foreground">#{trade.trade_number}</span>
 
                 {/* Verdict Badge */}
-                <Badge className={`text-[10px] px-1.5 py-0 font-semibold border ${colors.badge} w-fit`}>
+                <Badge className={`text-[10px] px-1.5 py-0 font-semibold border ${colors.badge} w-fit whitespace-nowrap`}>
                   {valuation.verdict.emoji} {valuation.verdict.label}
                 </Badge>
 
-                {/* Result */}
-                <div className="flex justify-center">
-                  <Badge variant="outline" className={`text-[9px] px-1 py-0 font-bold border ${resultBadge.className}`}>
-                    {resultBadge.label}
-                  </Badge>
-                </div>
-
                 {/* Team A */}
-                <span className="text-xs font-medium flex items-center gap-1.5 truncate">
+                <span className="text-xs font-medium flex items-center gap-1.5 min-w-0">
                   {getTeamEmoji(trade.team_a_name)}
                   <span className="truncate">{trade.team_a_name}</span>
+                  {valuation.winningTeamId === trade.team_a_id && (
+                    <Badge className="text-[8px] px-1 py-0 bg-emerald-500/20 text-emerald-400 border-emerald-500/30 border ml-0.5 shrink-0">WIN</Badge>
+                  )}
                 </span>
 
                 {/* Team B */}
-                <span className="text-xs font-medium flex items-center gap-1.5 truncate">
+                <span className="text-xs font-medium flex items-center gap-1.5 min-w-0">
                   {getTeamEmoji(trade.team_b_name)}
                   <span className="truncate">{trade.team_b_name}</span>
+                  {valuation.winningTeamId === trade.team_b_id && (
+                    <Badge className="text-[8px] px-1 py-0 bg-emerald-500/20 text-emerald-400 border-emerald-500/30 border ml-0.5 shrink-0">WIN</Badge>
+                  )}
+                  {absDiff <= 5 && (
+                    <Badge className="text-[8px] px-1 py-0 bg-emerald-500/20 text-emerald-400 border-emerald-500/30 border ml-0.5 shrink-0">EVEN</Badge>
+                  )}
                 </span>
 
                 {/* Diff % */}
@@ -223,16 +218,52 @@ function ExpandedTradeDetail({
           assets={teamAAssets}
           totalValue={valuation.teamAValue}
           isWinner={valuation.winningTeamId === trade.team_a_id}
+          adpMap={adpMap}
         />
         <AssetColumn
           teamName={trade.team_b_name}
           assets={teamBAssets}
           totalValue={valuation.teamBValue}
           isWinner={valuation.winningTeamId === trade.team_b_id}
+          adpMap={adpMap}
         />
+      </div>
+      {/* Gap + Winner summary */}
+      <div className="mt-3 pt-2 border-t border-border/30 text-center">
+        {valuation.winningTeamName ? (
+          <span className="text-[11px] font-bold">
+            {getTeamEmoji(valuation.winningTeamName)} <span className="text-emerald-400">{valuation.winningTeamName}</span>
+            <span className="text-muted-foreground"> receives </span>
+            <span className="font-mono text-emerald-400">+{Math.abs(Math.round(valuation.teamAValue - valuation.teamBValue)).toLocaleString()}</span>
+            <span className="text-muted-foreground"> more value ({Math.abs(valuation.pctDifference)}% gap)</span>
+          </span>
+        ) : (
+          <span className="text-[11px] font-bold text-emerald-400">⚖️ Even trade — within 5% value gap</span>
+        )}
       </div>
     </div>
   );
+}
+
+function formatPickLabel(a: TradeAssetRow): string {
+  const parts: string[] = [];
+  if (a.pick_year) parts.push(String(a.pick_year));
+  if (a.pick_round) parts.push(`Rd ${a.pick_round}`);
+  if (a.pick_number) parts.push(`#${a.pick_number}`);
+  if (parts.length === 0) return "Draft Pick";
+  return parts.join(" ");
+}
+
+function getAssetValue(a: TradeAssetRow, adpMap: Map<string, number>): number {
+  if (a.asset_type === "player") {
+    const adp = a.player_adp_at_trade
+      ? Number(a.player_adp_at_trade)
+      : adpMap.get((a.player_name ?? "").toLowerCase()) ?? null;
+    return adp ? calcPlayerValue(adp) : 0;
+  }
+  const year = a.pick_year ?? 2026;
+  const round = a.pick_round ?? 6;
+  return calcPickValue(round, year, a.pick_number ?? undefined);
 }
 
 function AssetColumn({
@@ -240,37 +271,46 @@ function AssetColumn({
   assets,
   totalValue,
   isWinner,
+  adpMap,
 }: {
   teamName: string;
   assets: TradeAssetRow[];
   totalValue: number;
   isWinner: boolean;
+  adpMap: Map<string, number>;
 }) {
   return (
     <div>
       <div className="text-[11px] font-bold text-muted-foreground mb-2 flex items-center gap-1.5">
         {getTeamEmoji(teamName)} {teamName} sends →
-        <span className="font-mono ml-auto">{Math.round(totalValue).toLocaleString()} pts</span>
-        {isWinner && <Badge className="text-[9px] px-1 py-0 bg-emerald-500/20 text-emerald-400 border-emerald-500/30 border ml-1">WINNER</Badge>}
       </div>
       <div className="space-y-1">
-        {assets.map((a) => (
-          <div key={a.id} className="flex items-center gap-1.5 text-xs">
-            {a.asset_type === "player" ? (
-              <Badge className={`text-[9px] px-1 py-0 ${POSITION_BG_CLASSES[a.player_position ?? ""] ?? "bg-muted"}`}>
-                {a.player_position}
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/10 border-amber-500/30 text-amber-400">📋</Badge>
-            )}
-            <span className="truncate flex-1">
-              {a.asset_type === "player"
-                ? a.player_name
-                : `${a.pick_year} Rd ${a.pick_round}${a.pick_number ? ` #${a.pick_number}` : ""}`}
-            </span>
-          </div>
-        ))}
+        {assets.map((a) => {
+          const val = getAssetValue(a, adpMap);
+          return (
+            <div key={a.id} className="flex items-center gap-1.5 text-xs">
+              {a.asset_type === "player" ? (
+                <Badge className={`text-[9px] px-1 py-0 ${POSITION_BG_CLASSES[a.player_position ?? ""] ?? "bg-muted"}`}>
+                  {a.player_position}
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/10 border-amber-500/30 text-amber-400">📋</Badge>
+              )}
+              <span className="truncate flex-1">
+                {a.asset_type === "player" ? a.player_name : formatPickLabel(a)}
+              </span>
+              <span className="text-[10px] font-mono text-muted-foreground">({Math.round(val).toLocaleString()})</span>
+            </div>
+          );
+        })}
       </div>
+      <div className="mt-2 pt-1.5 border-t border-border/30 flex items-center justify-between">
+        <span className="text-[10px] font-bold text-muted-foreground">Package Total</span>
+        <span className="text-xs font-bold font-mono">{Math.round(totalValue).toLocaleString()} pts</span>
+      </div>
+      {isWinner && (
+        <Badge className="text-[9px] px-1.5 py-0 bg-emerald-500/20 text-emerald-400 border-emerald-500/30 border mt-1.5 w-fit">WINNER</Badge>
+      )}
     </div>
   );
 }
