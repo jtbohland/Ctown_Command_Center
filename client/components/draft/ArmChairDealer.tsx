@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useApiData } from "@/hooks/useApiData";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -8,6 +8,7 @@ import TradeHistory from "./TradeHistory";
 import DraftCapitalView from "./DraftCapitalView";
 import GoodBadUgly from "./GoodBadUgly";
 import SirenSale from "./SirenSale";
+import Playbook from "./Playbook";
 
 export default function ArmChairDealer() {
   const { data, loading, fetching, isError, error, refetch } = useApiData("GetTradeData", {});
@@ -16,6 +17,13 @@ export default function ArmChairDealer() {
     refetch();
   }, [refetch]);
 
+  // Extract unique seasons from trade data for filters
+  const seasons = useMemo(() => {
+    if (!data?.trades) return [];
+    const s = new Set(data.trades.map((t: { season: string }) => t.season));
+    return Array.from(s).sort().reverse() as string[];
+  }, [data?.trades]);
+
   if (loading) {
     return (
       <div className="p-6 space-y-4">
@@ -23,7 +31,7 @@ export default function ArmChairDealer() {
           <Skeleton className="h-8 w-8 rounded-lg" />
           <Skeleton className="h-6 w-48" />
         </div>
-        <Skeleton className="h-10 w-96" />
+        <Skeleton className="h-10 w-full max-w-2xl" />
         <div className="grid grid-cols-2 gap-4">
           <Skeleton className="h-[300px] rounded-xl" />
           <Skeleton className="h-[300px] rounded-xl" />
@@ -37,9 +45,7 @@ export default function ArmChairDealer() {
       <div className="p-6">
         <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-5">
           <div className="text-2xl mb-2">⚠️</div>
-          <p className="text-red-400 text-sm font-semibold">
-            Failed to load trade data
-          </p>
+          <p className="text-red-400 text-sm font-semibold">Failed to load trade data</p>
           <p className="text-xs text-muted-foreground mt-1">
             Make sure to run InitTradeTables, then seed the data.
           </p>
@@ -54,13 +60,13 @@ export default function ArmChairDealer() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-border bg-gradient-to-r from-blue-900/20 via-card/50 to-red-900/20">
-        <div className="flex items-center gap-2">
+      <div className="px-5 py-3 border-b border-border bg-gradient-to-r from-blue-950/30 via-card/60 to-red-950/30">
+        <div className="flex items-center gap-3">
           <span className="text-2xl">🛋️</span>
           <div>
             <h2 className="text-lg font-extrabold tracking-tight">Arm Chair Dealer</h2>
             <span className="text-[10px] text-muted-foreground">
-              Dynasty trade evaluation powered by ADP • {trades.length} historical trades
+              Dynasty trade evaluation powered by ADP • {trades.length} historical trades across {seasons.length} seasons
             </span>
           </div>
           {fetching && (
@@ -71,34 +77,39 @@ export default function ArmChairDealer() {
 
       {/* Tabs */}
       <Tabs defaultValue="builder" className="flex-1 flex flex-col overflow-hidden">
-        <div className="px-4 pt-2 border-b border-border/50 bg-card/30">
-          <TabsList className="bg-muted/50">
-            <TabsTrigger value="builder">⚖️ Trade Builder</TabsTrigger>
-            <TabsTrigger value="history">📜 Trade Log</TabsTrigger>
-            <TabsTrigger value="gbu">🎭 Good, Bad & Ugly</TabsTrigger>
-            <TabsTrigger value="siren">🚨 Siren Sale</TabsTrigger>
-            <TabsTrigger value="capital">🗺️ Draft Capital</TabsTrigger>
+        <div className="px-5 pt-2 border-b border-border/50 bg-card/30">
+          <TabsList className="bg-muted/50 h-9">
+            <TabsTrigger value="builder" className="text-xs gap-1">⚖️ Deal Desk</TabsTrigger>
+            <TabsTrigger value="history" className="text-xs gap-1">📜 The Ledger</TabsTrigger>
+            <TabsTrigger value="gbu" className="text-xs gap-1">🎭 The Verdicts</TabsTrigger>
+            <TabsTrigger value="siren" className="text-xs gap-1">🚨 Sound The Alarm</TabsTrigger>
+            <TabsTrigger value="capital" className="text-xs gap-1">🏦 The Treasury</TabsTrigger>
+            <TabsTrigger value="playbook" className="text-xs gap-1">📖 The Playbook</TabsTrigger>
           </TabsList>
         </div>
 
-        <TabsContent value="builder" className="flex-1 overflow-auto px-4 py-3">
+        <TabsContent value="builder" className="flex-1 overflow-auto px-5 py-4">
           <TradeBuilder players={players} teams={teams} draftCapital={draftCapital} />
         </TabsContent>
 
-        <TabsContent value="history" className="flex-1 overflow-auto px-4 py-3">
-          <TradeHistory trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} />
+        <TabsContent value="history" className="flex-1 overflow-auto px-5 py-4">
+          <TradeHistory trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} />
         </TabsContent>
 
-        <TabsContent value="gbu" className="flex-1 overflow-auto px-4 py-3">
-          <GoodBadUgly trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} />
+        <TabsContent value="gbu" className="flex-1 overflow-auto px-5 py-4">
+          <GoodBadUgly trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} />
         </TabsContent>
 
-        <TabsContent value="siren" className="flex-1 overflow-auto px-4 py-3">
-          <SirenSale teams={teams} players={players} draftCapital={draftCapital} onSaved={handleTradeSaved} />
+        <TabsContent value="siren" className="flex-1 overflow-auto px-5 py-4">
+          <SirenSale teams={teams} players={players} draftCapital={draftCapital} onSaved={handleTradeSaved} seasons={seasons} />
         </TabsContent>
 
-        <TabsContent value="capital" className="flex-1 overflow-auto px-4 py-3">
+        <TabsContent value="capital" className="flex-1 overflow-auto px-5 py-4">
           <DraftCapitalView draftCapital={draftCapital} teams={teams} />
+        </TabsContent>
+
+        <TabsContent value="playbook" className="flex-1 overflow-auto px-5 py-4">
+          <Playbook />
         </TabsContent>
       </Tabs>
     </div>

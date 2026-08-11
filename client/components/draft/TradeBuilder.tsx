@@ -201,6 +201,42 @@ export default function TradeBuilder({ players, teams, draftCapital }: Props) {
         </Button>
       </div>
 
+      {/* Formula Explainer — collapsible, open by default */}
+      <details open className="group rounded-xl border border-border/50 bg-muted/10 overflow-hidden">
+        <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer select-none hover:bg-muted/20 transition-colors list-none">
+          <span className="text-base">📐</span>
+          <span className="text-xs font-bold text-muted-foreground">How the Formula Works</span>
+          <span className="ml-auto text-[10px] text-muted-foreground group-open:rotate-180 transition-transform">▼</span>
+        </summary>
+        <div className="px-4 pb-4 pt-2 space-y-3 text-xs text-muted-foreground border-t border-border/30">
+          <p>
+            Every player and pick is assigned a <span className="font-semibold text-foreground">point value</span> based on their
+            ADP (Average Draft Position) at the time of the trade. Earlier ADP = more valuable.
+          </p>
+          <div className="rounded-lg bg-background/60 border border-border/40 p-3 font-mono text-[10px] space-y-1">
+            <div><span className="text-blue-400">Player value</span> = 10,000 × (1 / ADP)^0.6</div>
+            <div><span className="text-amber-400">Pick value</span> = Mid-round ADP × year discount</div>
+            <div><span className="text-muted-foreground">2026 picks → 1.0×  ·  2027 picks → 0.8×  ·  2028 picks → 0.65×</span></div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { emoji: "⚖️", label: "Fair Trade", desc: "Within 5% — both sides happy" },
+              { emoji: "📈", label: "Slight Edge", desc: "5–15% gap — one side wins" },
+              { emoji: "🏆", label: "Clear Winner", desc: "15–25% gap — significant advantage" },
+              { emoji: "🚨", label: "Highway Robbery", desc: "25%+ gap — someone got fleeced" },
+            ].map((v) => (
+              <div key={v.label} className="flex items-start gap-1.5 bg-muted/20 rounded-lg px-2.5 py-2">
+                <span className="text-base leading-none">{v.emoji}</span>
+                <div>
+                  <div className="font-semibold text-foreground">{v.label}</div>
+                  <div className="text-[10px]">{v.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </details>
+
       {/* Results */}
       {result && (
         <TradeResults
