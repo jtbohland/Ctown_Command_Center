@@ -5,6 +5,8 @@
 const BASE_VALUE = 10000;
 const POWER = 0.6;
 const TOTAL_TEAMS = 11;
+const KEEPERS_PER_TEAM = 4;
+const KEEPER_OFFSET = TOTAL_TEAMS * KEEPERS_PER_TEAM; // 44 players locked on rosters before draft
 
 const YEAR_DISCOUNT: Record<number, number> = {
   2026: 1.0,
@@ -20,11 +22,14 @@ export function calcPlayerValue(adpRank: number): number {
 export function calcPickValue(round: number, year: number, pickInRound?: number): number {
   const startOfRound = (round - 1) * TOTAL_TEAMS + 1;
   const endOfRound = round * TOTAL_TEAMS;
-  const expectedAdp = pickInRound
+  const draftPosition = pickInRound
     ? startOfRound + pickInRound - 1
     : (startOfRound + endOfRound) / 2;
+  // In a 4-keeper league, the 44 best players are already rostered.
+  // A 1.01 pick targets the 45th-best player, not the 1st.
+  const effectiveAdp = draftPosition + KEEPER_OFFSET;
   const discount = YEAR_DISCOUNT[year] ?? 0.5;
-  return calcPlayerValue(expectedAdp) * discount;
+  return calcPlayerValue(effectiveAdp) * discount;
 }
 
 export type VerdictSeverity = "fair" | "slight" | "clear" | "robbery";

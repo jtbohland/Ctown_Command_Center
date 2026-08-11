@@ -35,12 +35,12 @@ export default function Playbook() {
             description="Build and evaluate trades in real-time. Select two teams, add players and picks to each side, and get an instant valuation verdict. See exactly how much each side is giving up."
           />
           <TabExplainer
-            emoji="📜"
+            emoji="📚"
             name="The Ledger"
             description="Complete trade history across all seasons. Every trade ever made, with verdicts, winners, and the full asset breakdown. Filter by season and expand any trade to see the details."
           />
           <TabExplainer
-            emoji="🎭"
+            emoji="🏛️"
             name="The Verdicts"
             description="All trades categorized by how lopsided they were. See the best, worst, and fairest trades ever made. Filter by season or verdict type. Includes Trade of the Season highlights and a manager leaderboard."
           />
@@ -50,7 +50,7 @@ export default function Playbook() {
             description="Log trades as they happen around the league. When two other teams make a deal, record it here so the system can track and evaluate it alongside everything else."
           />
           <TabExplainer
-            emoji="🏦"
+            emoji="💰"
             name="The Treasury"
             description="Draft capital map showing who owns which picks for upcoming drafts. See which teams are pick-rich and who's been trading futures."
           />
@@ -88,10 +88,14 @@ export default function Playbook() {
             <div>
               <div className="text-xs font-bold text-foreground mb-1">Draft Pick Value</div>
               <code className="text-xs bg-background/60 px-2 py-1 rounded font-mono">
-                Value = PlayerValue(midpoint_of_round) × year_discount
+                Value = PlayerValue(draft_position + 44) × year_discount
               </code>
               <p className="text-xs mt-1.5">
-                Picks are valued at the expected ADP of the middle of that round. 
+                <span className="text-emerald-400 font-semibold">Keeper offset:</span> In a 4-keeper, 11-team league, 44 players are locked on rosters before the draft. 
+                Pick 1.01 targets the 45th-best player (ADP 45), not the 1st. This makes picks worth significantly less than star players — 
+                which is why blockbuster trades always involve multiple picks for one elite asset.
+              </p>
+              <p className="text-xs mt-1">
                 Future picks are discounted: 2026 = 100%, 2027 = 80%, 2028 = 65%.
               </p>
             </div>
@@ -128,7 +132,7 @@ export default function Playbook() {
       title: "Pro Tips",
       content: (
         <div className="space-y-3 text-sm text-muted-foreground">
-          <Tip text="Early-round picks are worth exponentially more than late-round picks. A 1st rounder ≠ a 2nd + 3rd in most cases." />
+          <Tip text="With the keeper offset, a 1st round pick (ADP ~45-55) is a solid starter, not a league-winner. It takes multiple picks to match an elite player — that's by design." />
           <Tip text="Future year picks are discounted. A 2028 1st round pick is worth ~65% of the same pick this year." />
           <Tip text="Use The Verdicts to study which managers tend to 'win' trades and which ones overpay." />
           <Tip text="Log every trade with Sound The Alarm — the more data, the better Deal Déjà Vu works." />

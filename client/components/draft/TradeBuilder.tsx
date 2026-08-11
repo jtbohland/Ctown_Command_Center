@@ -213,10 +213,14 @@ export default function TradeBuilder({ players, teams, draftCapital }: Props) {
             Every player and pick is assigned a <span className="font-semibold text-foreground">point value</span> based on their
             ADP (Average Draft Position) at the time of the trade. Earlier ADP = more valuable.
           </p>
-          <div className="rounded-lg bg-background/60 border border-border/40 p-3 font-mono text-[10px] space-y-1">
+          <div className="rounded-lg bg-background/60 border border-border/40 p-3 font-mono text-[10px] space-y-1.5">
             <div><span className="text-blue-400">Player value</span> = 10,000 × (1 / ADP)^0.6</div>
-            <div><span className="text-amber-400">Pick value</span> = Mid-round ADP × year discount</div>
-            <div><span className="text-muted-foreground">2026 picks → 1.0×  ·  2027 picks → 0.8×  ·  2028 picks → 0.65×</span></div>
+            <div><span className="text-amber-400">Pick value</span> = 10,000 × (1 / effective ADP)^0.6 × year discount</div>
+            <div className="border-t border-border/20 pt-1.5">
+              <span className="text-emerald-400">Keeper offset:</span> 11 teams × 4 keepers = <span className="text-foreground font-bold">44</span>
+            </div>
+            <div><span className="text-muted-foreground">Pick 1.01 → ADP 45 · Pick 2.01 → ADP 56 · Pick 3.01 → ADP 67</span></div>
+            <div><span className="text-muted-foreground">Year discount: 2026 → 1.0× · 2027 → 0.8× · 2028 → 0.65×</span></div>
           </div>
           <div className="grid grid-cols-2 gap-2">
             {[

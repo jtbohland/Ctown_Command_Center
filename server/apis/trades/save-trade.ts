@@ -58,7 +58,9 @@ export default api({
 
     const tradeId = inserted.id;
 
-    // Insert assets
+    // Insert assets + auto-move picks on the draft board
+    const pickMoves: Array<{ year: number; round: number; fromTeamId: number; toTeamId: number }> = [];
+
     for (const asset of assets) {
       if (asset.type === "player") {
         await ctx.integrations.apps_db.execute(
@@ -74,7 +76,30 @@ export default api({
           [tradeId, asset.fromTeamId, asset.pickYear, asset.pickRound, asset.pickNumber],
           { label: `Insert pick asset: ${asset.pickYear} Rd ${asset.pickRound}` }
         );
+
+        // Track pick moves: fromTeamId is giving the pick, the other team receives it
+        if (asset.pickYear && asset.pickRound) {
+          const toTeamId = asset.fromTeamId === teamAId ? teamBId : teamAId;
+          pickMoves.push({
+            year: asset.pickYear,
+            round: asset.pickRound,
+            fromTeamId: asset.fromTeamId,
+            toTeamId,
+          });
+        }
       }
+    }
+
+    // Auto-move picks on the draft board (The Treasury / Draft Tracker)
+    // Update current_team_id for each traded pick in ffwr_draft_capital
+    for (const move of pickMoves) {
+      await ctx.integrations.apps_db.execute(
+        `UPDATE ffwr_draft_capital
+         SET current_team_id = $1
+         WHERE year = $2 AND round = $3 AND current_team_id = $4`,
+        [move.toTeamId, move.year, move.round, move.fromTeamId],
+        { label: `Move pick: ${move.year} Rd ${move.round} → team ${move.toTeamId}` }
+      );
     }
 
     return {

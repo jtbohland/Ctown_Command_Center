@@ -76,15 +76,15 @@ export default function ArmChairDealer() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="builder" className="flex-1 flex flex-col overflow-hidden">
+      <Tabs defaultValue="playbook" className="flex-1 flex flex-col overflow-hidden">
         <div className="px-5 pt-2 border-b border-border/50 bg-card/30">
           <TabsList className="bg-muted/50 h-9">
-            <TabsTrigger value="builder" className="text-xs gap-1">⚖️ Deal Desk</TabsTrigger>
-            <TabsTrigger value="history" className="text-xs gap-1">📜 The Ledger</TabsTrigger>
-            <TabsTrigger value="gbu" className="text-xs gap-1">🎭 The Verdicts</TabsTrigger>
-            <TabsTrigger value="siren" className="text-xs gap-1">🚨 Sound The Alarm</TabsTrigger>
-            <TabsTrigger value="capital" className="text-xs gap-1">🏦 The Treasury</TabsTrigger>
             <TabsTrigger value="playbook" className="text-xs gap-1">📖 The Playbook</TabsTrigger>
+            <TabsTrigger value="builder" className="text-xs gap-1">⚖️ Deal Desk</TabsTrigger>
+            <TabsTrigger value="history" className="text-xs gap-1">📚 The Ledger</TabsTrigger>
+            <TabsTrigger value="gbu" className="text-xs gap-1">🏛️ The Verdicts</TabsTrigger>
+            <TabsTrigger value="siren" className="text-xs gap-1">🚨 Sound The Alarm</TabsTrigger>
+            <TabsTrigger value="capital" className="text-xs gap-1">💰 The Treasury</TabsTrigger>
           </TabsList>
         </div>
 

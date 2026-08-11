@@ -7,6 +7,8 @@ const BASE_VALUE = 10000;
 const POWER = 0.6;
 const TOTAL_TEAMS = 11;
 const ROUNDS_PER_DRAFT = 11;
+const KEEPERS_PER_TEAM = 4;
+const KEEPER_OFFSET = TOTAL_TEAMS * KEEPERS_PER_TEAM; // 44 players locked on rosters before draft
 
 // Future pick discount factors
 const YEAR_DISCOUNT: Record<number, number> = {
@@ -16,15 +18,16 @@ const YEAR_DISCOUNT: Record<number, number> = {
 };
 
 // Expected ADP range by round (11 teams per round)
-// Round 1 picks map to ADP 1-11, Round 2 to 12-22, etc.
+// In a 4-keeper league, 44 players are already rostered.
+// Round 1 picks target players 45-55, Round 2 targets 56-66, etc.
 function pickToExpectedAdp(round: number, pickInRound?: number): number {
   const startOfRound = (round - 1) * TOTAL_TEAMS + 1;
   const endOfRound = round * TOTAL_TEAMS;
-  if (pickInRound) {
-    return startOfRound + pickInRound - 1;
-  }
-  // Unknown pick position → use middle of round
-  return (startOfRound + endOfRound) / 2;
+  const draftPosition = pickInRound
+    ? startOfRound + pickInRound - 1
+    : (startOfRound + endOfRound) / 2;
+  // Shift by keeper offset: 1.01 = 45th best player, not 1st
+  return draftPosition + KEEPER_OFFSET;
 }
 
 // Core value formula: 10000 × (1/rank)^0.6
