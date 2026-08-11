@@ -84,7 +84,23 @@ export default api({
       { label: "Create ffwr_draft_capital table" }
     );
 
-    // ── 5. Create indexes ───────────────────────────────────────────
+    // ── 5. Rookie classes table (dynasty factors) ─────────────────
+    await ctx.integrations.apps_db.execute(
+      `CREATE TABLE IF NOT EXISTS ffwr_rookie_classes (
+        id SERIAL PRIMARY KEY,
+        nfl_draft_year INTEGER NOT NULL,
+        overall_pick INTEGER NOT NULL,
+        player_name TEXT NOT NULL,
+        position TEXT NOT NULL,
+        age_on_draft_day INTEGER NOT NULL,
+        nfl_team TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )`,
+      undefined,
+      { label: "Create ffwr_rookie_classes table" }
+    );
+
+    // ── 6. Create indexes ───────────────────────────────────────────
     await ctx.integrations.apps_db.execute(
       `CREATE INDEX IF NOT EXISTS idx_ffwr_historical_adp_season 
        ON ffwr_historical_adp(season)`,

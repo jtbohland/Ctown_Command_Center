@@ -201,6 +201,52 @@ export default function TradeBuilder({ players, teams, draftCapital }: Props) {
         </Button>
       </div>
 
+      {/* Formula Explainer — collapsible, open by default */}
+      <details open className="group rounded-xl border border-border/50 bg-muted/10 overflow-hidden">
+        <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer select-none hover:bg-muted/20 transition-colors list-none">
+          <span className="text-base">📐</span>
+          <span className="text-xs font-bold text-muted-foreground">How the Formula Works</span>
+          <span className="ml-auto text-[10px] text-muted-foreground group-open:rotate-180 transition-transform">▼</span>
+        </summary>
+        <div className="px-4 pb-4 pt-2 space-y-3 text-xs text-muted-foreground border-t border-border/30">
+          <p>
+            Every player and pick is assigned a <span className="font-semibold text-foreground">point value</span> based on their
+            ADP (Average Draft Position) at the time of the trade. Earlier ADP = more valuable.
+          </p>
+          <div className="rounded-lg bg-background/60 border border-border/40 p-3 font-mono text-[10px] space-y-1.5">
+            <div><span className="text-blue-400">Player value</span> = 10,000 × (1 / ADP)^0.6</div>
+            <div><span className="text-amber-400">Pick value</span> = 10,000 × (1 / effective ADP)^0.6 × year discount</div>
+            <div className="border-t border-border/20 pt-1.5">
+              <span className="text-emerald-400">Keeper offset:</span> 11 teams × 4 keepers = <span className="text-foreground font-bold">44</span>
+            </div>
+            <div><span className="text-muted-foreground">Pick 1.01 → ADP 45 · Pick 2.01 → ADP 56 · Pick 3.01 → ADP 67</span></div>
+            <div><span className="text-muted-foreground">Year discount: 2026 → 1.0× · 2027 → 0.8× · 2028 → 0.65×</span></div>
+          </div>
+          <div className="rounded-lg bg-background/60 border border-border/40 p-3 space-y-1.5 text-[10px] font-mono">
+            <div className="text-[11px] font-sans font-bold text-foreground mb-1">🏈 Dynasty Multipliers</div>
+            <div><span className="text-purple-400">Rookie premium:</span> 1.10× — top-50 NFL pick in their draft year</div>
+            <div><span className="text-pink-400">Positional scarcity:</span> 1.08× — top-5 QB or TE by ADP</div>
+            <div><span className="text-cyan-400">Age curve:</span> ≤24 → 1.06× · 25-27 → 1.03× · 28-29 → 1.00× · 30-31 → 0.95× · 32+ → 0.90×</div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { emoji: "🧤", label: "Fair Catch", desc: "Within 5% — both sides happy" },
+              { emoji: "📈", label: "Edge Rush", desc: "5–15% gap — one side wins" },
+              { emoji: "🏆", label: "Pick Six", desc: "15–25% gap — significant advantage" },
+              { emoji: "🚩", label: "Flag on the Play", desc: "25%+ gap — someone got fleeced" },
+            ].map((v) => (
+              <div key={v.label} className="flex items-start gap-1.5 bg-muted/20 rounded-lg px-2.5 py-2">
+                <span className="text-base leading-none">{v.emoji}</span>
+                <div>
+                  <div className="font-semibold text-foreground">{v.label}</div>
+                  <div className="text-[10px]">{v.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </details>
+
       {/* Results */}
       {result && (
         <TradeResults

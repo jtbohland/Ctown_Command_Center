@@ -23,12 +23,13 @@ interface Props {
   players: PlayerRow[];
   draftCapital: DraftCapitalRow[];
   onSaved: () => void;
+  seasons: string[];
 }
 
-export default function SirenSale({ teams, players, draftCapital, onSaved }: Props) {
+export default function SirenSale({ teams, players, draftCapital, onSaved, seasons }: Props) {
   const [teamAId, setTeamAId] = useState<number | null>(null);
   const [teamBId, setTeamBId] = useState<number | null>(null);
-  const [season, setSeason] = useState<string>("2025-26");
+  const [season, setSeason] = useState<string>("");
   const [period, setPeriod] = useState<string>("off-season");
   const [teamAAssets, setTeamAAssets] = useState<Asset[]>([]);
   const [teamBAssets, setTeamBAssets] = useState<Asset[]>([]);
@@ -135,12 +136,13 @@ export default function SirenSale({ teams, players, draftCapital, onSaved }: Pro
       {/* Config Row */}
       <div className="flex items-center gap-3">
         <Select value={season} onValueChange={setSeason}>
-          <SelectTrigger className="h-8 w-28 text-xs">
-            <SelectValue />
+          <SelectTrigger className="h-8 w-32 text-xs">
+            <SelectValue placeholder="Season..." />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="2025-26">2025-26</SelectItem>
-            <SelectItem value="2024-25">2024-25</SelectItem>
+            {seasons.map((s) => (
+              <SelectItem key={s} value={s}>{s}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <Select value={period} onValueChange={setPeriod}>
