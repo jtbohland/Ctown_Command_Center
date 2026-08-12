@@ -193,25 +193,50 @@ function applyDynastyMultiplier(
   return baseValue * multiplier;
 }
 
+/** Build a season-keyed ADP map: season → (lowercased player name → adp_rank) */
+export function buildSeasonAdpMap(
+  historicalAdp: HistoricalAdpRow[],
+): Map<string, Map<string, number>> {
+  const map = new Map<string, Map<string, number>>();
+  for (const row of historicalAdp) {
+    if (!map.has(row.season)) map.set(row.season, new Map());
+    map.get(row.season)!.set(row.player_name.toLowerCase(), row.adp_rank);
+  }
+  return map;
+}
+
+/** Look up a player's ADP for a specific season, returns null if not found */
+export function getSeasonAdp(
+  seasonAdpMap: Map<string, Map<string, number>>,
+  season: string,
+  playerName: string,
+): number | null {
+  return seasonAdpMap.get(season)?.get(playerName.toLowerCase()) ?? null;
+}
+
 /**
- * Compute valuation for a historical trade using ADP data + optional dynasty factors.
+ * Compute valuation for a historical trade using season-aware ADP data + optional dynasty factors.
+ * Each trade is evaluated using the ADP from the season it occurred in.
  */
 export function evaluateHistoricalTrade(
   trade: TradeRow,
   assets: TradeAssetRow[],
-  adpMap: Map<string, number>,
+  seasonAdpMap: Map<string, Map<string, number>>,
   dynastyCtx?: DynastyContext,
 ): TradeValuation {
   const tradeAssets = assets.filter((a) => a.trade_id === trade.id);
   const teamAAssets = tradeAssets.filter((a) => a.from_team_id === trade.team_a_id);
   const teamBAssets = tradeAssets.filter((a) => a.from_team_id === trade.team_b_id);
 
+  // Get the ADP map for THIS trade's season
+  const seasonMap = seasonAdpMap.get(trade.season);
+
   function sumValue(items: TradeAssetRow[]): number {
     return items.reduce((sum, a) => {
       if (a.asset_type === "player") {
         const adp = a.player_adp_at_trade
           ? Number(a.player_adp_at_trade)
-          : adpMap.get((a.player_name ?? "").toLowerCase()) ?? null;
+          : seasonMap?.get((a.player_name ?? "").toLowerCase()) ?? null;
         let value = adp ? calcPlayerValue(adp) : 0;
         // Apply dynasty multipliers if context provided
         if (dynastyCtx && a.player_name && value > 0) {
