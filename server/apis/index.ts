@@ -25,6 +25,7 @@ import SeedHistoricalTradesV2 from './trades/seed-historical-trades-v2.js';
 import ReseedTradesFromCsv from './trades/reseed-trades-from-csv.js';
 import DedupTrades from './trades/dedup-trades.js';
 import SeedRookieClasses from './trades/seed-rookie-classes.js';
+import SeedAdpFromCsv from './trades/seed-adp-from-csv.js';
 
 const apis = {
   InitDatabase,
@@ -54,6 +55,7 @@ const apis = {
   ReseedTradesFromCsv,
   DedupTrades,
   SeedRookieClasses,
+  SeedAdpFromCsv,
 } as const;
 
 export default apis;

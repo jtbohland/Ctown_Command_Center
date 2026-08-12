@@ -10,7 +10,17 @@ const KEEPERS_PER_TEAM = 4;
 const KEEPER_OFFSET = TOTAL_TEAMS * KEEPERS_PER_TEAM; // 44
 
 // ─── Dynasty Multiplier Constants ───────────────────────────
-const ROOKIE_PREMIUM = 1.10;
+// Graduated rookie premium: picks 1-128 (NFL rounds 1-4)
+// Pick 1 → 1.20x, pick 128 → ~1.01x (quadratic falloff)
+const ROOKIE_MAX_PICK = 128;
+const ROOKIE_MAX_BOOST = 0.20;    // +20% for #1 overall
+const ROOKIE_MIN_BOOST = 0.01;    // +1% at pick 128
+function getRookiePremium(overallPick: number): number {
+  if (overallPick < 1 || overallPick > ROOKIE_MAX_PICK) return 1.0;
+  const t = (overallPick - 1) / (ROOKIE_MAX_PICK - 1);
+  const boost = ROOKIE_MIN_BOOST + (ROOKIE_MAX_BOOST - ROOKIE_MIN_BOOST) * Math.pow(1 - t, 2);
+  return 1 + boost;
+}
 const POSITIONAL_SCARCITY = 1.08;
 function getAgeFactor(age: number): number {
   if (age <= 24) return 1.06;
@@ -18,6 +28,24 @@ function getAgeFactor(age: number): number {
   if (age <= 29) return 1.00;
   if (age <= 31) return 0.95;
   return 0.90;
+}
+
+// ─── Name Normalization ─────────────────────────────────────
+// Strips periods, apostrophes, suffixes (Jr/Sr/II/III/IV/V),
+// collapses whitespace, and applies known corrections.
+const NAME_CORRECTIONS: Record<string, string> = {
+  "patrick maholmes": "patrick mahomes",
+  "patrick maholmes ii": "patrick mahomes",
+};
+
+function normalizeName(name: string): string {
+  let n = name
+    .toLowerCase()
+    .replace(/[.']/g, "")            // strip periods and apostrophes
+    .replace(/\b(jr|sr|ii|iii|iv|v)\b/gi, "")  // strip suffixes
+    .replace(/\s+/g, " ")            // collapse whitespace
+    .trim();
+  return NAME_CORRECTIONS[n] ?? n;
 }
 
 // Future pick discount factors
@@ -130,14 +158,14 @@ export default api({
       undefined,
       { label: "Fetch current ADP with positions" }
     );
-    const adpMap = new Map(currentAdp.map((p) => [p.player_name.toLowerCase(), p.adp_rank]));
+    const adpMap = new Map(currentAdp.map((p) => [normalizeName(p.player_name), p.adp_rank]));
 
     // Build position → sorted ADP lists for scarcity check
     const positionAdpMap = new Map<string, { name: string; adp: number }[]>();
     for (const p of currentAdp) {
       const pos = p.position.toUpperCase();
       if (!positionAdpMap.has(pos)) positionAdpMap.set(pos, []);
-      positionAdpMap.get(pos)!.push({ name: p.player_name.toLowerCase(), adp: p.adp_rank });
+      positionAdpMap.get(pos)!.push({ name: normalizeName(p.player_name), adp: p.adp_rank });
     }
     // Sort each position list by ADP
     for (const list of positionAdpMap.values()) {
@@ -172,22 +200,24 @@ export default api({
 
       let multiplier = 1.0;
       const factors: string[] = [];
-      const nameLower = playerName.toLowerCase();
+      const nameNorm = normalizeName(playerName);
       const pos = playerPosition?.toUpperCase() ?? "";
 
-      // 1. Rookie premium
-      const isRookie = rookieClasses.some(
-        (r) => r.nfl_draft_year === CURRENT_DRAFT_YEAR && r.overall_pick <= 50 && r.player_name.toLowerCase() === nameLower,
+      // 1. Graduated rookie premium (picks 1-128, NFL rounds 1-4)
+      const rookieDraftMatch = rookieClasses.find(
+        (r) => r.nfl_draft_year === CURRENT_DRAFT_YEAR && r.overall_pick <= ROOKIE_MAX_PICK && normalizeName(r.player_name) === nameNorm,
       );
-      if (isRookie) {
-        multiplier *= ROOKIE_PREMIUM;
-        factors.push("Rookie +10%");
+      if (rookieDraftMatch) {
+        const premium = getRookiePremium(rookieDraftMatch.overall_pick);
+        multiplier *= premium;
+        const pct = Math.round((premium - 1) * 100);
+        factors.push(`Rookie Pick #${rookieDraftMatch.overall_pick} +${pct}%`);
       }
 
       // 2. Positional scarcity: top 5 QB/TE
       if ((pos === "QB" || pos === "TE") && playerAdp !== null) {
         const posList = positionAdpMap.get(pos) ?? [];
-        const rank = posList.findIndex((p) => p.name === nameLower);
+        const rank = posList.findIndex((p) => p.name === nameNorm);
         if (rank >= 0 && rank < 5) {
           multiplier *= POSITIONAL_SCARCITY;
           factors.push(`${pos}${rank + 1} Scarcity +8%`);
@@ -195,7 +225,7 @@ export default api({
       }
 
       // 3. Age curve
-      const rookieEntry = rookieClasses.find((r) => r.player_name.toLowerCase() === nameLower);
+      const rookieEntry = rookieClasses.find((r) => normalizeName(r.player_name) === nameNorm);
       if (rookieEntry) {
         const currentAge = rookieEntry.age_on_draft_day + (CURRENT_DRAFT_YEAR - rookieEntry.nfl_draft_year);
         const ageFactor = getAgeFactor(currentAge);
@@ -217,7 +247,7 @@ export default api({
         if (asset.type === "player") {
           const name = asset.playerName ?? "Unknown";
           let adp = asset.playerAdp ?? null;
-          if (!adp) adp = adpMap.get(name.toLowerCase()) ?? null;
+          if (!adp) adp = adpMap.get(normalizeName(name)) ?? null;
           const rawValue = adp ? calcValue(adp) : 0;
           const { value, factors } = applyDynasty(rawValue, name, asset.playerPosition ?? null, adp);
           valuations.push({ name, value, adpUsed: adp, dynastyFactors: factors });
@@ -257,8 +287,8 @@ export default api({
 
     // ── Deal Déjà Vu ──
     const playerNamesInTrade = [
-      ...teamAGives.filter((a) => a.type === "player").map((a) => a.playerName?.toLowerCase()),
-      ...teamBGives.filter((a) => a.type === "player").map((a) => a.playerName?.toLowerCase()),
+      ...teamAGives.filter((a) => a.type === "player").map((a) => a.playerName ? normalizeName(a.playerName) : undefined),
+      ...teamBGives.filter((a) => a.type === "player").map((a) => a.playerName ? normalizeName(a.playerName) : undefined),
     ].filter(Boolean) as string[];
 
     const dejaVu: z.infer<typeof DejaVuSchema>[] = [];

@@ -8,6 +8,24 @@ const TOTAL_TEAMS = 11;
 const KEEPERS_PER_TEAM = 4;
 const KEEPER_OFFSET = TOTAL_TEAMS * KEEPERS_PER_TEAM; // 44 players locked on rosters before draft
 
+// ─── Name Normalization ──────────────────────────────────────
+// Strips periods, apostrophes, suffixes (Jr/Sr/II/III/IV/V),
+// collapses whitespace, and applies known corrections.
+const NAME_CORRECTIONS: Record<string, string> = {
+  "patrick maholmes": "patrick mahomes",
+  "patrick maholmes ii": "patrick mahomes",
+};
+
+export function normalizeName(name: string): string {
+  let n = name
+    .toLowerCase()
+    .replace(/[.']/g, "")            // strip periods and apostrophes
+    .replace(/\b(jr|sr|ii|iii|iv|v)\b/gi, "")  // strip suffixes
+    .replace(/\s+/g, " ")            // collapse whitespace
+    .trim();
+  return NAME_CORRECTIONS[n] ?? n;
+}
+
 const YEAR_DISCOUNT: Record<number, number> = {
   2026: 1.0,
   2027: 0.8,
@@ -168,7 +186,7 @@ function applyDynastyMultiplier(
   ctx: DynastyContext,
 ): number {
   let multiplier = 1.0;
-  const nameLower = playerName.toLowerCase();
+  const nameNorm = normalizeName(playerName);
   // Season "2024-25" → draft year 2024
   const draftYear = parseInt(tradeSeason.split("-")[0]);
 
@@ -177,7 +195,7 @@ function applyDynastyMultiplier(
     (r) =>
       r.nfl_draft_year === draftYear &&
       r.overall_pick <= ROOKIE_MAX_PICK &&
-      r.player_name.toLowerCase() === nameLower,
+      normalizeName(r.player_name) === nameNorm,
   );
   if (rookieMatch) multiplier *= getRookiePremium(rookieMatch.overall_pick);
 
@@ -187,13 +205,13 @@ function applyDynastyMultiplier(
     const seasonAdp = ctx.allAdp
       .filter((a) => a.season === tradeSeason && a.position.toUpperCase() === pos)
       .sort((a, b) => a.adp_rank - b.adp_rank);
-    const posRank = seasonAdp.findIndex((a) => a.player_name.toLowerCase() === nameLower);
+    const posRank = seasonAdp.findIndex((a) => normalizeName(a.player_name) === nameNorm);
     if (posRank >= 0 && posRank < 5) multiplier *= POSITIONAL_SCARCITY;
   }
 
   // 3. Age curve: compute current age from rookie class data
   const rookieEntry = ctx.rookieClasses.find(
-    (r) => r.player_name.toLowerCase() === nameLower,
+    (r) => normalizeName(r.player_name) === nameNorm,
   );
   if (rookieEntry) {
     const currentAge = rookieEntry.age_on_draft_day + (draftYear - rookieEntry.nfl_draft_year);
@@ -211,7 +229,7 @@ export function buildSeasonAdpMap(
   const map = new Map<string, Map<string, number>>();
   for (const row of historicalAdp) {
     if (!map.has(row.season)) map.set(row.season, new Map());
-    map.get(row.season)!.set(row.player_name.toLowerCase(), row.adp_rank);
+    map.get(row.season)!.set(normalizeName(row.player_name), row.adp_rank);
   }
   return map;
 }
@@ -222,7 +240,7 @@ export function getSeasonAdp(
   season: string,
   playerName: string,
 ): number | null {
-  return seasonAdpMap.get(season)?.get(playerName.toLowerCase()) ?? null;
+  return seasonAdpMap.get(season)?.get(normalizeName(playerName)) ?? null;
 }
 
 /**
@@ -247,7 +265,7 @@ export function evaluateHistoricalTrade(
       if (a.asset_type === "player") {
         const adp = a.player_adp_at_trade
           ? Number(a.player_adp_at_trade)
-          : seasonMap?.get((a.player_name ?? "").toLowerCase()) ?? null;
+          : seasonMap?.get(normalizeName(a.player_name ?? "")) ?? null;
         let value = adp ? calcPlayerValue(adp) : 0;
         // Apply dynasty multipliers if context provided
         if (dynastyCtx && a.player_name && value > 0) {
