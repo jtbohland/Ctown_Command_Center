@@ -7,8 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Icon } from "@/components/ui/icon";
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
 import { SEVERITY_COLORS, type VerdictSeverity } from "@/lib/trade-utils";
+import { type TradeModifiers, DEFAULT_MODIFIERS } from "@/lib/trade-modifiers";
 
 import TradeResults from "./TradeResults";
+import ModelCustomizer from "./ModelCustomizer";
 
 type Player = { id: number; name: string; position: string; nfl_team: string; adp_rank: number | null };
 type Team = { id: number; team_name: string; manager_name: string; color: string };
@@ -36,6 +38,7 @@ export default function TradeBuilder({ players, teams, draftCapital }: Props) {
   const [teamAGives, setTeamAGives] = useState<Asset[]>([]);
   const [teamBGives, setTeamBGives] = useState<Asset[]>([]);
   const [result, setResult] = useState<any>(null);
+  const [modifiers, setModifiers] = useState<TradeModifiers>({ ...DEFAULT_MODIFIERS });
 
   const { run: evaluateTrade, loading: evaluating } = useApi("EvaluateTrade");
 
@@ -111,6 +114,7 @@ export default function TradeBuilder({ players, teams, draftCapital }: Props) {
           pickRound: a.pickRound ?? null,
           pickNumber: a.pickNumber ?? null,
         })),
+        modifiers,
       });
       setResult(res);
     } catch (err) {
@@ -119,7 +123,7 @@ export default function TradeBuilder({ players, teams, draftCapital }: Props) {
         : String(err);
       toast.error("Evaluation failed: " + message);
     }
-  }, [teamAId, teamBId, teamAGives, teamBGives, evaluateTrade]);
+  }, [teamAId, teamBId, teamAGives, teamBGives, modifiers, evaluateTrade]);
 
   const handleReset = useCallback(() => {
     setTeamAGives([]);
@@ -200,6 +204,9 @@ export default function TradeBuilder({ players, teams, draftCapital }: Props) {
           🔄 Reset
         </Button>
       </div>
+
+      {/* Model Customizer — collapsible */}
+      <ModelCustomizer modifiers={modifiers} onChange={setModifiers} />
 
       {/* Formula Explainer — collapsible, open by default */}
       <details open className="group rounded-xl border border-border/50 bg-muted/10 overflow-hidden">

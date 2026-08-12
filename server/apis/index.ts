@@ -26,6 +26,8 @@ import ReseedTradesFromCsv from './trades/reseed-trades-from-csv.js';
 import DedupTrades from './trades/dedup-trades.js';
 import SeedRookieClasses from './trades/seed-rookie-classes.js';
 import SeedAdpFromCsv from './trades/seed-adp-from-csv.js';
+import DataQualityCheck from './trades/data-quality-check.js';
+import BackfillPickYear from './trades/backfill-pick-year.js';
 
 const apis = {
   InitDatabase,
@@ -56,6 +58,8 @@ const apis = {
   DedupTrades,
   SeedRookieClasses,
   SeedAdpFromCsv,
+  DataQualityCheck,
+  BackfillPickYear,
 } as const;
 
 export default apis;
