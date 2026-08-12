@@ -7,11 +7,15 @@ interface ValuationItem {
   name: string;
   value: number;
   adpUsed: number | null;
+  valueStatus?: "resolved" | "unresolved";
+  dynastyFactors?: string[];
 }
 
 interface SideResult {
   assets: ValuationItem[];
   totalValue: number;
+  hasUnresolved?: boolean;
+  unresolvedReasons?: string[];
 }
 
 interface DejaVuMatch {
@@ -29,6 +33,7 @@ interface EvalResult {
   pctDifference: number;
   winningTeamId: number | null;
   verdict: { label: string; emoji: string; severity: string };
+  verdictStatus?: "definitive" | "incomplete";
   dejaVu: DejaVuMatch[];
 }
 
@@ -46,10 +51,21 @@ export default function TradeResults({ result, teamAName, teamBName, teamAColor,
   const teamAProgress = (teamASide.totalValue / maxValue) * 100;
   const teamBProgress = (teamBSide.totalValue / maxValue) * 100;
 
-  const severity = verdict.severity as VerdictSeverity;
-  const colors = SEVERITY_COLORS[severity] ?? SEVERITY_COLORS.fair;
+  const isIncomplete = result.verdictStatus === "incomplete";
+  const severity = (isIncomplete ? "fair" : verdict.severity) as VerdictSeverity;
+  const colors = isIncomplete
+    ? { bg: "bg-yellow-500/10", border: "border-yellow-500/30", text: "text-yellow-400", badge: "" }
+    : (SEVERITY_COLORS[severity] ?? SEVERITY_COLORS.fair);
   const absDiff = Math.abs(pctDifference);
-  const winnerName = pctDifference > 0 ? teamBName : pctDifference < 0 ? teamAName : null;
+  // Spec §5: pctDiff = (teamBSent - teamASent) / avg
+  // Positive → Team B sent more → Team A received more → Team A wins
+  const winnerName = !isIncomplete && pctDifference > 0 ? teamAName : !isIncomplete && pctDifference < 0 ? teamBName : null;
+
+  // Collect all unresolved reasons from both sides
+  const unresolvedReasons = [
+    ...(teamASide.unresolvedReasons ?? []),
+    ...(teamBSide.unresolvedReasons ?? []),
+  ];
 
   return (
     <div className="space-y-4 mt-4">
@@ -59,14 +75,20 @@ export default function TradeResults({ result, teamAName, teamBName, teamAColor,
         <div className="relative">
           <div className="text-4xl mb-2">{verdict.emoji}</div>
           <div className={`font-extrabold text-2xl ${colors.text}`}>{verdict.label}</div>
-          {absDiff > 5 && winnerName && (
+          {isIncomplete && (
+            <div className="text-sm mt-2 text-yellow-300/80">
+              One or more assets could not be valued — verdict is not definitive.
+            </div>
+          )}
+          {!isIncomplete && absDiff > 5 && winnerName && (
             <div className="text-sm mt-2 opacity-90">
-              {getTeamEmoji(winnerName)} <span className="font-semibold">{winnerName}</span> wins by{" "}
+              {getTeamEmoji(winnerName)} <span className="font-semibold">{winnerName}</span>{" "}
+              <span className="text-muted-foreground">winner under this model</span> by{" "}
               <span className="font-mono font-bold text-lg">{absDiff}%</span>
             </div>
           )}
-          {absDiff <= 5 && (
-            <div className="text-sm mt-2 opacity-70">Both sides are within 5% — solid deal for everyone! 🤝</div>
+          {!isIncomplete && absDiff <= 5 && (
+            <div className="text-sm mt-2 opacity-70">Fair within configured tolerance (±5%) — solid deal for everyone! 🤝</div>
           )}
         </div>
       </div>
@@ -75,23 +97,43 @@ export default function TradeResults({ result, teamAName, teamBName, teamAColor,
       <div className="grid grid-cols-2 gap-4">
         <ValueColumn
           teamName={teamAName}
-          label="receives"
+          label="receives (inferred)"
           side={teamBSide}
           progress={teamBProgress}
           accentColor={teamAColor ?? "#3b82f6"}
           gradientClass="from-blue-600/10"
-          isWinner={pctDifference < -5}
+          isWinner={pctDifference > 5}
         />
         <ValueColumn
           teamName={teamBName}
-          label="receives"
+          label="receives (inferred)"
           side={teamASide}
           progress={teamAProgress}
           accentColor={teamBColor ?? "#ef4444"}
           gradientClass="from-red-600/10"
-          isWinner={pctDifference > 5}
+          isWinner={pctDifference < -5}
         />
       </div>
+
+      {/* ⚠️ Unresolved Assets Warning */}
+      {unresolvedReasons.length > 0 && (
+        <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/5 p-4">
+          <h4 className="text-sm font-bold mb-2 flex items-center gap-1.5 text-yellow-400">
+            <span className="text-base">⚠️</span> Unresolved Assets
+          </h4>
+          <ul className="space-y-1">
+            {unresolvedReasons.map((reason, i) => (
+              <li key={i} className="text-xs text-yellow-300/70 flex items-start gap-1.5">
+                <span className="mt-0.5">•</span>
+                <span>{reason}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-[10px] text-muted-foreground mt-2">
+            Resolve these to get a definitive verdict.
+          </p>
+        </div>
+      )}
 
       {/* 📡 Deal Déjà Vu */}
       {dejaVu.length > 0 && (
@@ -142,16 +184,21 @@ function ValueColumn({
       </div>
       <div className="flex items-baseline gap-2">
         <span className="text-2xl font-extrabold font-mono">{Math.round(side.totalValue).toLocaleString()}</span>
-        <span className="text-xs text-muted-foreground">pts</span>
+        <span className="text-xs text-muted-foreground">value received</span>
         {isWinner && <span className="text-emerald-400 text-sm ml-auto">✅ Winner</span>}
       </div>
       <Progress value={progress} className="h-2.5 rounded-full" />
       <div className="space-y-1 pt-1">
         {side.assets.map((asset, i) => (
           <div key={i} className="flex items-center justify-between text-xs bg-background/40 rounded px-2 py-1">
-            <span className="truncate flex-1 font-medium">{asset.name}</span>
-            <Badge variant="secondary" className="ml-1 text-[10px] font-mono px-1.5 font-bold">
-              {Math.round(asset.value).toLocaleString()}
+            <span className={`truncate flex-1 font-medium ${asset.valueStatus === "unresolved" ? "text-yellow-400" : ""}`}>{asset.name}</span>
+            <Badge
+              variant="secondary"
+              className={`ml-1 text-[10px] font-mono px-1.5 font-bold ${
+                asset.valueStatus === "unresolved" ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30" : ""
+              }`}
+            >
+              {asset.valueStatus === "unresolved" ? "?" : Math.round(asset.value).toLocaleString()}
             </Badge>
           </div>
         ))}

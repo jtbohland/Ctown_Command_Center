@@ -2,32 +2,52 @@ import { api, z, postgres } from "@superblocksteam/sdk-api";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
-// ─── Value Engine Constants ─────────────────────────────────
+// ─── Value Engine Constants (defaults — overridable via modifiers input) ───
 const BASE_VALUE = 10000;
-const POWER = 0.6;
-const TOTAL_TEAMS = 11;
+const DEFAULT_POWER = 0.6;
 const KEEPERS_PER_TEAM = 4;
-const KEEPER_OFFSET = TOTAL_TEAMS * KEEPERS_PER_TEAM; // 44
+
+// C-Town league size by draft year: 10 teams 2019-2024, 11 teams 2025+
+// Per spec §3: "C-Town had 10 teams for fantasy draft years 2019–2024 and 11 teams for 2025–2026"
+const LEAGUE_SIZE_BY_YEAR: Record<number, number> = {
+  2019: 10, 2020: 10, 2021: 10, 2022: 10, 2023: 10, 2024: 10,
+  2025: 11, 2026: 11, 2027: 11,
+};
+const DEFAULT_LEAGUE_SIZE = 11; // for future years beyond the map
+
+function getLeagueSize(year: number): number {
+  return LEAGUE_SIZE_BY_YEAR[year] ?? DEFAULT_LEAGUE_SIZE;
+}
+
+function getKeeperOffset(year: number): number {
+  return getLeagueSize(year) * KEEPERS_PER_TEAM;
+}
 
 // ─── Dynasty Multiplier Constants ───────────────────────────
-// Graduated rookie premium: picks 1-128 (NFL rounds 1-4)
-// Pick 1 → 1.20x, pick 128 → ~1.01x (quadratic falloff)
 const ROOKIE_MAX_PICK = 128;
-const ROOKIE_MAX_BOOST = 0.20;    // +20% for #1 overall
 const ROOKIE_MIN_BOOST = 0.01;    // +1% at pick 128
-function getRookiePremium(overallPick: number): number {
+
+function getRookiePremium(overallPick: number, maxBoost: number): number {
   if (overallPick < 1 || overallPick > ROOKIE_MAX_PICK) return 1.0;
   const t = (overallPick - 1) / (ROOKIE_MAX_PICK - 1);
-  const boost = ROOKIE_MIN_BOOST + (ROOKIE_MAX_BOOST - ROOKIE_MIN_BOOST) * Math.pow(1 - t, 2);
+  const boost = ROOKIE_MIN_BOOST + (maxBoost - ROOKIE_MIN_BOOST) * Math.pow(1 - t, 2);
   return 1 + boost;
 }
-const POSITIONAL_SCARCITY = 1.08;
-function getAgeFactor(age: number): number {
+
+// Raw age factor (before ageCurve multiplier is applied)
+function getRawAgeFactor(age: number): number {
   if (age <= 24) return 1.06;
   if (age <= 27) return 1.03;
   if (age <= 29) return 1.00;
   if (age <= 31) return 0.95;
   return 0.90;
+}
+
+function getAgeFactor(age: number, ageCurve: number): number {
+  if (ageCurve === 0) return 1.0; // age disabled
+  const raw = getRawAgeFactor(age);
+  // Scale the deviation from 1.0 by ageCurve
+  return 1.0 + (raw - 1.0) * ageCurve;
 }
 
 // ─── Name Normalization ─────────────────────────────────────
@@ -48,32 +68,41 @@ function normalizeName(name: string): string {
   return NAME_CORRECTIONS[n] ?? n;
 }
 
-// Future pick discount factors
-const YEAR_DISCOUNT: Record<number, number> = {
-  2026: 1.0,
-  2027: 0.8,
-  2028: 0.65,
-};
+// Future pick discount: computed from futurePickDiscount modifier
+const CURRENT_YEAR_FOR_DISCOUNT = 2026;
+function getYearDiscount(year: number, perYearDiscount: number): number {
+  const yearsOut = Math.max(0, year - CURRENT_YEAR_FOR_DISCOUNT);
+  if (yearsOut === 0) return 1.0;
+  return Math.pow(1 - perYearDiscount, yearsOut);
+}
 
-function pickToExpectedAdp(round: number, pickInRound?: number): number {
-  const startOfRound = (round - 1) * TOTAL_TEAMS + 1;
-  const endOfRound = round * TOTAL_TEAMS;
+function pickToExpectedAdp(round: number, year: number, pickInRound?: number): number {
+  const leagueSize = getLeagueSize(year);
+  const startOfRound = (round - 1) * leagueSize + 1;
+  const endOfRound = round * leagueSize;
   const draftPosition = pickInRound
     ? startOfRound + pickInRound - 1
     : (startOfRound + endOfRound) / 2;
-  return draftPosition + KEEPER_OFFSET;
+  return draftPosition + getKeeperOffset(year);
 }
 
-function calcValue(adpRank: number): number {
+function calcValue(adpRank: number, power: number): number {
   if (adpRank <= 0) return 0;
-  return BASE_VALUE * Math.pow(1 / adpRank, POWER);
+  return BASE_VALUE * Math.pow(1 / adpRank, power);
 }
 
-function getVerdict(pctDiff: number): { label: string; emoji: string; severity: string } {
+function getVerdict(
+  pctDiff: number,
+  fairTolerance: number,
+  verdictScale: number,
+): { label: string; emoji: string; severity: string } {
   const absDiff = Math.abs(pctDiff);
-  if (absDiff <= 5) return { label: "Fair Catch", emoji: "🧤", severity: "fair" };
-  if (absDiff <= 15) return { label: "Edge Rush", emoji: "📈", severity: "slight" };
-  if (absDiff <= 25) return { label: "Pick Six", emoji: "🏆", severity: "clear" };
+  const t1 = fairTolerance;                    // Fair Catch ceiling
+  const t2 = fairTolerance + 10 * verdictScale; // Edge Rush ceiling
+  const t3 = fairTolerance + 20 * verdictScale; // Pick Six ceiling
+  if (absDiff <= t1) return { label: "Fair Catch", emoji: "🧤", severity: "fair" };
+  if (absDiff <= t2) return { label: "Edge Rush", emoji: "📈", severity: "slight" };
+  if (absDiff <= t3) return { label: "Pick Six", emoji: "🏆", severity: "clear" };
   return { label: "Flag on the Play", emoji: "🚩", severity: "robbery" };
 }
 
@@ -92,11 +121,14 @@ const ValuationSchema = z.object({
   value: z.number(),
   adpUsed: z.number().nullable(),
   dynastyFactors: z.array(z.string()),
+  valueStatus: z.enum(["resolved", "unresolved"]),
 });
 
 const SideResultSchema = z.object({
   assets: z.array(ValuationSchema),
   totalValue: z.number(),
+  hasUnresolved: z.boolean(),
+  unresolvedReasons: z.array(z.string()),
 });
 
 const DejaVuSchema = z.object({
@@ -135,6 +167,19 @@ export default api({
     teamBId: z.number(),
     teamAGives: z.array(AssetInputSchema),
     teamBGives: z.array(AssetInputSchema),
+    modifiers: z.object({
+      qbScarcity: z.number().optional(),
+      tePremium: z.number().optional(),
+      rbPremium: z.number().optional(),
+      wrPremium: z.number().optional(),
+      rookieHype: z.number().optional(),
+      ageCurve: z.number().optional(),
+      futurePickDiscount: z.number().optional(),
+      valueCurve: z.number().optional(),
+      fairTolerance: z.number().optional(),
+      verdictScale: z.number().optional(),
+      dejaVuSensitivity: z.number().optional(),
+    }).nullable().optional(),
   }),
 
   output: z.object({
@@ -147,13 +192,28 @@ export default api({
       emoji: z.string(),
       severity: z.string(),
     }),
+    verdictStatus: z.enum(["definitive", "incomplete"]),
     dejaVu: z.array(DejaVuSchema),
   }),
 
-  async run(ctx, { teamAId, teamBId, teamAGives, teamBGives }) {
+  async run(ctx, { teamAId, teamBId, teamAGives, teamBGives, modifiers }) {
+    // Merge modifiers with defaults
+    const mod = {
+      qbScarcity: modifiers?.qbScarcity ?? 1.08,
+      tePremium: modifiers?.tePremium ?? 1.00,
+      rbPremium: modifiers?.rbPremium ?? 1.00,
+      wrPremium: modifiers?.wrPremium ?? 1.00,
+      rookieHype: modifiers?.rookieHype ?? 0.20,
+      ageCurve: modifiers?.ageCurve ?? 1.0,
+      futurePickDiscount: modifiers?.futurePickDiscount ?? 0.10,
+      valueCurve: modifiers?.valueCurve ?? DEFAULT_POWER,
+      fairTolerance: modifiers?.fairTolerance ?? 5,
+      verdictScale: modifiers?.verdictScale ?? 1.0,
+      dejaVuSensitivity: modifiers?.dejaVuSensitivity ?? 3,
+    };
     // Get current season ADP with positions
     const currentAdp = await ctx.integrations.apps_db.query(
-      `SELECT player_name, adp_rank, position FROM ffwr_historical_adp WHERE season = '2025-26' ORDER BY adp_rank LIMIT 300`,
+      `SELECT player_name, adp_rank, position FROM ffwr_historical_adp WHERE season = '2026-27' ORDER BY adp_rank LIMIT 300`,
       AdpRowSchema,
       undefined,
       { label: "Fetch current ADP with positions" }
@@ -187,9 +247,9 @@ export default api({
       ctx.log.warn("ffwr_rookie_classes not found — dynasty factors skipped");
     }
 
-    const CURRENT_DRAFT_YEAR = 2025;
+    const CURRENT_DRAFT_YEAR = 2026;
 
-    // Dynasty multiplier helper
+    // Dynasty multiplier helper — uses mod.* for all tunables
     function applyDynasty(
       baseValue: number,
       playerName: string,
@@ -204,31 +264,55 @@ export default api({
       const pos = playerPosition?.toUpperCase() ?? "";
 
       // 1. Graduated rookie premium (picks 1-128, NFL rounds 1-4)
-      const rookieDraftMatch = rookieClasses.find(
-        (r) => r.nfl_draft_year === CURRENT_DRAFT_YEAR && r.overall_pick <= ROOKIE_MAX_PICK && normalizeName(r.player_name) === nameNorm,
-      );
-      if (rookieDraftMatch) {
-        const premium = getRookiePremium(rookieDraftMatch.overall_pick);
-        multiplier *= premium;
-        const pct = Math.round((premium - 1) * 100);
-        factors.push(`Rookie Pick #${rookieDraftMatch.overall_pick} +${pct}%`);
-      }
-
-      // 2. Positional scarcity: top 5 QB/TE
-      if ((pos === "QB" || pos === "TE") && playerAdp !== null) {
-        const posList = positionAdpMap.get(pos) ?? [];
-        const rank = posList.findIndex((p) => p.name === nameNorm);
-        if (rank >= 0 && rank < 5) {
-          multiplier *= POSITIONAL_SCARCITY;
-          factors.push(`${pos}${rank + 1} Scarcity +8%`);
+      if (mod.rookieHype > 0) {
+        const rookieDraftMatch = rookieClasses.find(
+          (r) => r.nfl_draft_year === CURRENT_DRAFT_YEAR && r.overall_pick <= ROOKIE_MAX_PICK && normalizeName(r.player_name) === nameNorm,
+        );
+        if (rookieDraftMatch) {
+          const premium = getRookiePremium(rookieDraftMatch.overall_pick, mod.rookieHype);
+          multiplier *= premium;
+          const pct = Math.round((premium - 1) * 100);
+          factors.push(`Rookie Pick #${rookieDraftMatch.overall_pick} +${pct}%`);
         }
       }
 
-      // 3. Age curve
+      // 2. Positional scarcity: top 5 at position
+      if (playerAdp !== null) {
+        const posList = positionAdpMap.get(pos) ?? [];
+        const rank = posList.findIndex((p) => p.name === nameNorm);
+        const isTop5 = rank >= 0 && rank < 5;
+
+        // QB scarcity
+        if (pos === "QB" && isTop5 && mod.qbScarcity > 1.0) {
+          multiplier *= mod.qbScarcity;
+          const pct = Math.round((mod.qbScarcity - 1) * 100);
+          factors.push(`QB${rank + 1} Scarcity +${pct}%`);
+        }
+        // TE premium
+        if (pos === "TE" && isTop5 && mod.tePremium > 1.0) {
+          multiplier *= mod.tePremium;
+          const pct = Math.round((mod.tePremium - 1) * 100);
+          factors.push(`TE${rank + 1} Premium +${pct}%`);
+        }
+      }
+
+      // 3. Positional multipliers (RB/WR — applies to ALL, not just top 5)
+      if (pos === "RB" && mod.rbPremium !== 1.0) {
+        multiplier *= mod.rbPremium;
+        const pct = Math.round((mod.rbPremium - 1) * 100);
+        factors.push(`RB Adj ${pct >= 0 ? "+" : ""}${pct}%`);
+      }
+      if (pos === "WR" && mod.wrPremium !== 1.0) {
+        multiplier *= mod.wrPremium;
+        const pct = Math.round((mod.wrPremium - 1) * 100);
+        factors.push(`WR Adj ${pct >= 0 ? "+" : ""}${pct}%`);
+      }
+
+      // 4. Age curve (uses mod.ageCurve to scale deviation)
       const rookieEntry = rookieClasses.find((r) => normalizeName(r.player_name) === nameNorm);
-      if (rookieEntry) {
+      if (rookieEntry && mod.ageCurve > 0) {
         const currentAge = rookieEntry.age_on_draft_day + (CURRENT_DRAFT_YEAR - rookieEntry.nfl_draft_year);
-        const ageFactor = getAgeFactor(currentAge);
+        const ageFactor = getAgeFactor(currentAge, mod.ageCurve);
         if (ageFactor !== 1.0) {
           multiplier *= ageFactor;
           const pct = Math.round((ageFactor - 1) * 100);
@@ -248,25 +332,39 @@ export default api({
           const name = asset.playerName ?? "Unknown";
           let adp = asset.playerAdp ?? null;
           if (!adp) adp = adpMap.get(normalizeName(name)) ?? null;
-          const rawValue = adp ? calcValue(adp) : 0;
+          const rawValue = adp ? calcValue(adp, mod.valueCurve) : 0;
           const { value, factors } = applyDynasty(rawValue, name, asset.playerPosition ?? null, adp);
-          valuations.push({ name, value, adpUsed: adp, dynastyFactors: factors });
+          if (adp) {
+            valuations.push({ name, value, adpUsed: adp, dynastyFactors: factors, valueStatus: "resolved" });
+          } else {
+            // Spec §6: failed ADP lookup → unresolved, not zero
+            valuations.push({ name: `⚠️ ${name} (no ADP)`, value: 0, adpUsed: null, dynastyFactors: ["Unresolved: player not found in ADP data"], valueStatus: "unresolved" });
+          }
         } else {
-          const year = asset.pickYear ?? 2026;
+          const year = asset.pickYear ?? null;
           const round = asset.pickRound ?? 6;
           const pickNum = asset.pickNumber ?? undefined;
-          const expectedAdp = pickToExpectedAdp(round, pickNum);
-          const discount = YEAR_DISCOUNT[year] ?? 0.5;
-          const rawValue = calcValue(expectedAdp);
-          const value = rawValue * discount;
-          const pickLabel = pickNum ? `${year} Rd ${round} Pick ${pickNum}` : `${year} Rd ${round}`;
-          valuations.push({ name: pickLabel, value, adpUsed: expectedAdp, dynastyFactors: [] });
+          if (year === null) {
+            // Spec §6: missing pick year → mark unresolved, do NOT default to current year
+            const pickLabel = pickNum ? `Rd ${round} Pick ${pickNum}` : `Rd ${round}`;
+            valuations.push({ name: `⚠️ ${pickLabel} (no year)`, value: 0, adpUsed: null, dynastyFactors: ["Unresolved: missing pick year"], valueStatus: "unresolved" });
+          } else {
+            const expectedAdp = pickToExpectedAdp(round, year, pickNum);
+            const discount = getYearDiscount(year, mod.futurePickDiscount);
+            const rawValue = calcValue(expectedAdp, mod.valueCurve);
+            const value = rawValue * discount;
+            const pickLabel = pickNum ? `${year} Rd ${round} Pick ${pickNum}` : `${year} Rd ${round}`;
+            valuations.push({ name: pickLabel, value, adpUsed: expectedAdp, dynastyFactors: [], valueStatus: "resolved" });
+          }
         }
       }
 
+      const unresolvedAssets = valuations.filter((v) => v.valueStatus === "unresolved");
       return {
         assets: valuations,
         totalValue: valuations.reduce((sum, v) => sum + v.value, 0),
+        hasUnresolved: unresolvedAssets.length > 0,
+        unresolvedReasons: unresolvedAssets.map((v) => v.dynastyFactors[0] ?? `${v.name} has no value`),
       };
     }
 
@@ -278,12 +376,20 @@ export default api({
       ? ((teamBSide.totalValue - teamASide.totalValue) / avgValue) * 100
       : 0;
 
+    // Spec §5: pctDifference = (teamBSentValue - teamASentValue) / avg
+    // Positive pctDiff means Team B sent more → Team A received more → Team A wins
+    const hasAnyUnresolved = teamASide.hasUnresolved || teamBSide.hasUnresolved;
+
     let winningTeamId: number | null = null;
-    if (Math.abs(pctDifference) > 5) {
-      winningTeamId = pctDifference > 0 ? teamBId : teamAId;
+    // Spec §7: do not present a definitive verdict when material assets are unresolved
+    if (!hasAnyUnresolved && Math.abs(pctDifference) > mod.fairTolerance) {
+      winningTeamId = pctDifference > 0 ? teamAId : teamBId;
     }
 
-    const verdict = getVerdict(pctDifference);
+    const verdict = hasAnyUnresolved
+      ? { label: "Data Incomplete", emoji: "⚠️", severity: "incomplete" }
+      : getVerdict(pctDifference, mod.fairTolerance, mod.verdictScale);
+    const verdictStatus = hasAnyUnresolved ? "incomplete" as const : "definitive" as const;
 
     // ── Deal Déjà Vu ──
     const playerNamesInTrade = [
@@ -313,7 +419,7 @@ export default api({
         JOIN ffwr_teams tb_team ON tb_team.id = t.team_b_id
         WHERE LOWER(assets.player_name) = ANY($1::text[])
         ORDER BY t.id, t.trade_number DESC
-        LIMIT 5`,
+        LIMIT ${Math.max(1, Math.min(10, Math.round(mod.dejaVuSensitivity)))}`,
         TradeMatchSchema,
         [playerNamesInTrade],
         { label: "Find Deal Déjà Vu matches" }
@@ -337,6 +443,7 @@ export default api({
       pctDifference: Math.round(pctDifference * 10) / 10,
       winningTeamId,
       verdict,
+      verdictStatus,
       dejaVu,
     };
   },

@@ -1,5 +1,8 @@
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import DataQualityPanel from "./DataQualityPanel";
+import FormulaDeepDive from "./FormulaDeepDive";
+import { SLIDER_CONFIGS, CATEGORY_LABELS, DEFAULT_MODIFIERS } from "@/lib/trade-modifiers";
 
 export default function Playbook() {
   const [expanded, setExpanded] = useState<string | null>("overview");
@@ -65,78 +68,51 @@ export default function Playbook() {
     {
       id: "formula",
       icon: "🧮",
-      title: "The Valuation Formula",
+      title: "How The Formula Works",
+      content: <FormulaDeepDive />,
+    },
+    {
+      id: "modifiers",
+      icon: "⚙️",
+      title: "Customizable Modifiers",
       content: (
         <div className="space-y-4 text-sm text-muted-foreground leading-relaxed">
-          <p className="text-foreground font-medium">
-            Every player and pick gets a point value based on ADP (Average Draft Position). 
-            Here's how it works:
+          <p>
+            The <span className="text-foreground font-semibold">⚙️ Customize Model</span> panel on the Deal Desk tab lets you adjust
+            how the Arm Chair Dealer values players and picks. All 11 sliders have sensible defaults based on C-Town league conventions — 
+            you only need to touch them if you want to explore "what if" scenarios.
           </p>
-
-          <div className="bg-muted/30 rounded-lg p-4 border border-border/50 space-y-3">
-            <div>
-              <div className="text-xs font-bold text-foreground mb-1">Player Value Formula</div>
-              <code className="text-xs bg-background/60 px-2 py-1 rounded font-mono">
-                Value = 10,000 × (1 / ADP_Rank) ^ 0.6
-              </code>
-              <p className="text-xs mt-1.5">
-                Lower ADP = higher value. The #1 overall pick is worth ~10,000 pts. 
-                The curve drops steeply — top-10 picks are worth significantly more than mid-round picks.
-              </p>
-            </div>
-
-            <div>
-              <div className="text-xs font-bold text-foreground mb-1">Draft Pick Value</div>
-              <code className="text-xs bg-background/60 px-2 py-1 rounded font-mono">
-                Value = PlayerValue(draft_position + 44) × year_discount
-              </code>
-              <p className="text-xs mt-1.5">
-                <span className="text-emerald-400 font-semibold">Keeper offset:</span> In a 4-keeper, 11-team league, 44 players are locked on rosters before the draft. 
-                Pick 1.01 targets the 45th-best player (ADP 45), not the 1st. This makes picks worth significantly less than star players — 
-                which is why blockbuster trades always involve multiple picks for one elite asset.
-              </p>
-              <p className="text-xs mt-1">
-                Future picks are discounted: 2026 = 100%, 2027 = 80%, 2028 = 65%.
-              </p>
-            </div>
+          <div className="space-y-3">
+            {Object.entries(CATEGORY_LABELS).map(([cat, meta]) => {
+              const configs = SLIDER_CONFIGS.filter((c) => c.category === cat);
+              if (configs.length === 0) return null;
+              return (
+                <div key={cat} className="bg-muted/30 rounded-lg p-3 border border-border/50">
+                  <div className="text-xs font-bold text-foreground mb-2">{meta.emoji} {meta.label}</div>
+                  <div className="space-y-1.5">
+                    {configs.map((c) => (
+                      <div key={c.key} className="flex items-baseline gap-2">
+                        <span className="text-xs font-semibold text-foreground min-w-[140px]">{c.label}</span>
+                        <span className="text-[10px] font-mono text-muted-foreground">Default: {c.format(c.defaultValue)}</span>
+                        <span className="text-[10px] text-muted-foreground/70">— {c.description}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-
-          <div>
-            <div className="text-xs font-bold text-foreground mb-2">How Trades Are Scored</div>
-            <p>
-              We sum the total value for each side, then calculate the percentage difference between them. 
-              That % difference determines the verdict:
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2 mt-2">
-            <VerdictExplainer emoji="🧤" label="Fair Catch" range="0-5%" color="text-emerald-400" description="Both sides are balanced" />
-            <VerdictExplainer emoji="📈" label="Edge Rush" range="5-15%" color="text-amber-400" description="One side got a little more" />
-            <VerdictExplainer emoji="🏆" label="Pick Six" range="15-25%" color="text-orange-400" description="Notably lopsided" />
-            <VerdictExplainer emoji="🚩" label="Flag on the Play" range="25%+" color="text-red-400" description="Someone got fleeced" />
-          </div>
-
-          <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3 mt-3">
-            <div className="text-xs font-bold text-purple-400 mb-1">🏈 Dynasty Multipliers</div>
-            <p className="text-xs mb-2">
-              After base value is calculated, dynasty-relevant factors apply multipliers:
-            </p>
-            <div className="space-y-1 text-xs font-mono">
-              <div><span className="text-purple-400">Rookie premium:</span> 1.10× — top-50 NFL draft pick in their rookie season</div>
-              <div><span className="text-pink-400">Positional scarcity:</span> 1.08× — top-5 QB or TE by ADP (hardest to replace)</div>
-              <div><span className="text-cyan-400">Age curve:</span> ≤24 → 1.06× · 25-27 → 1.03× · 28-29 → 1.00× · 30-31 → 0.95× · 32+ → 0.90×</div>
-            </div>
-          </div>
-
-          <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3 mt-3">
-            <div className="text-xs font-bold text-purple-400 mb-1">📡 Deal Déjà Vu</div>
-            <p className="text-xs">
-              When you evaluate a trade, the system searches historical trades for similar player/pick combinations 
-              and shows you comparable deals from the past — so you can see precedent before making a decision.
-            </p>
-          </div>
+          <p className="text-xs text-muted-foreground/70">
+            Modified sliders show a yellow badge on the panel. Use "🔄 Reset All" to return to league defaults.
+          </p>
         </div>
       ),
+    },
+    {
+      id: "data-quality",
+      icon: "🔬",
+      title: "Data Quality",
+      content: <DataQualityPanel />,
     },
     {
       id: "tips",
@@ -205,18 +181,6 @@ function TabExplainer({ emoji, name, description }: { emoji: string; name: strin
   );
 }
 
-function VerdictExplainer({ emoji, label, range, color, description }: { emoji: string; label: string; range: string; color: string; description: string }) {
-  return (
-    <div className="bg-muted/20 rounded-lg p-2.5 border border-border/50">
-      <div className="flex items-center gap-1.5">
-        <span className="text-sm">{emoji}</span>
-        <span className={`text-xs font-bold ${color}`}>{label}</span>
-      </div>
-      <div className="text-[10px] font-mono text-muted-foreground mt-0.5">{range} difference</div>
-      <div className="text-[10px] text-muted-foreground">{description}</div>
-    </div>
-  );
-}
 
 function Tip({ text }: { text: string }) {
   return (

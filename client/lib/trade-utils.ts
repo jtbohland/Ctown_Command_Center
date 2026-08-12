@@ -4,9 +4,23 @@
 
 const BASE_VALUE = 10000;
 const POWER = 0.6;
-const TOTAL_TEAMS = 11;
 const KEEPERS_PER_TEAM = 4;
-const KEEPER_OFFSET = TOTAL_TEAMS * KEEPERS_PER_TEAM; // 44 players locked on rosters before draft
+
+// C-Town league size by draft year: 10 teams 2019-2024, 11 teams 2025+
+// Per spec §3: "C-Town had 10 teams for fantasy draft years 2019–2024 and 11 teams for 2025–2026"
+const LEAGUE_SIZE_BY_YEAR: Record<number, number> = {
+  2019: 10, 2020: 10, 2021: 10, 2022: 10, 2023: 10, 2024: 10,
+  2025: 11, 2026: 11, 2027: 11,
+};
+const DEFAULT_LEAGUE_SIZE = 11;
+
+export function getLeagueSize(year: number): number {
+  return LEAGUE_SIZE_BY_YEAR[year] ?? DEFAULT_LEAGUE_SIZE;
+}
+
+function getKeeperOffset(year: number): number {
+  return getLeagueSize(year) * KEEPERS_PER_TEAM;
+}
 
 // ─── Name Normalization ──────────────────────────────────────
 // Strips periods, apostrophes, suffixes (Jr/Sr/II/III/IV/V),
@@ -61,12 +75,13 @@ export function calcPlayerValue(adpRank: number): number {
 }
 
 export function calcPickValue(round: number, year: number, pickInRound?: number): number {
-  const startOfRound = (round - 1) * TOTAL_TEAMS + 1;
-  const endOfRound = round * TOTAL_TEAMS;
+  const leagueSize = getLeagueSize(year);
+  const startOfRound = (round - 1) * leagueSize + 1;
+  const endOfRound = round * leagueSize;
   const draftPosition = pickInRound
     ? startOfRound + pickInRound - 1
     : (startOfRound + endOfRound) / 2;
-  const effectiveAdp = draftPosition + KEEPER_OFFSET;
+  const effectiveAdp = draftPosition + getKeeperOffset(year);
   const discount = YEAR_DISCOUNT[year] ?? 0.5;
   return calcPlayerValue(effectiveAdp) * discount;
 }
@@ -280,8 +295,10 @@ export function evaluateHistoricalTrade(
         }
         return sum + value;
       } else {
-        const year = a.pick_year ?? 2026;
+        const year = a.pick_year;
         const round = a.pick_round ?? 6;
+        // Skip picks with no year — they'll be unresolved (handled in Batch 2)
+        if (year === null || year === undefined) return sum;
         return sum + calcPickValue(round, year, a.pick_number ?? undefined);
       }
     }, 0);
@@ -297,13 +314,15 @@ export function evaluateHistoricalTrade(
   const verdict = getVerdict(pctDifference);
   let winningTeamId: number | null = null;
   let winningTeamName: string | null = null;
+  // Spec §5: pctDifference = (teamBSentValue - teamASentValue) / avg
+  // Positive pctDiff means Team B sent more → Team A received more → Team A wins
   if (Math.abs(pctDifference) > 5) {
     if (pctDifference > 0) {
-      winningTeamId = trade.team_b_id;
-      winningTeamName = trade.team_b_name;
-    } else {
       winningTeamId = trade.team_a_id;
       winningTeamName = trade.team_a_name;
+    } else {
+      winningTeamId = trade.team_b_id;
+      winningTeamName = trade.team_b_name;
     }
   }
 
