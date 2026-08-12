@@ -10,11 +10,13 @@ const AssetInputSchema = z.object({
   pickRound: z.number().nullable(),
   pickNumber: z.number().nullable(),
   fromTeamId: z.number(),
+  /** For 3-team trades: which team receives this asset */
+  recipientTeamId: z.number().nullable(),
 });
 
 export default api({
   name: "SaveTrade",
-  description: "Saves a new trade to the historical trade database.",
+  description: "Saves a trade with cascading roster, draft board, and treasury updates.",
 
   integrations: {
     apps_db: postgres(APPS_DB),
@@ -23,6 +25,7 @@ export default api({
   input: z.object({
     teamAId: z.number(),
     teamBId: z.number(),
+    teamCId: z.number().nullable(),
     season: z.string(),
     period: z.string(),
     assets: z.array(AssetInputSchema),
@@ -32,9 +35,15 @@ export default api({
     message: z.string(),
     tradeId: z.number(),
     tradeNumber: z.number(),
+    playersMovedCount: z.number(),
+    picksMovedCount: z.number(),
   }),
 
-  async run(ctx, { teamAId, teamBId, season, period, assets }) {
+  async run(ctx, { teamAId, teamBId, teamCId, season, period, assets }) {
+    const isThreeTeam = teamCId != null;
+    const tradeType = isThreeTeam ? "three-team" : "two-team";
+    const participantCount = isThreeTeam ? 3 : 2;
+
     // Get next trade number for this season
     const MaxSchema = z.object({ max_num: z.coerce.number().nullable() });
     const [maxRow] = await ctx.integrations.apps_db.query(
@@ -45,67 +54,111 @@ export default api({
     );
     const nextTradeNumber = (maxRow?.max_num ?? 0) + 1;
 
-    // Insert trade
+    // Insert trade with three-team fields
     const InsertSchema = z.object({ id: z.coerce.number() });
     const [inserted] = await ctx.integrations.apps_db.query(
-      `INSERT INTO ffwr_trades (trade_number, season, trade_date, team_a_id, team_b_id, status, period)
-       VALUES ($1, $2, CURRENT_DATE, $3, $4, 'completed', $5)
+      `INSERT INTO ffwr_trades (trade_number, season, trade_date, team_a_id, team_b_id, team_c_id, trade_type, participant_count, status, period)
+       VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, $7, 'completed', $8)
        RETURNING id`,
       InsertSchema,
-      [nextTradeNumber, season, teamAId, teamBId, period],
+      [nextTradeNumber, season, teamAId, teamBId, teamCId, tradeType, participantCount, period],
       { label: "Insert trade record" }
     );
 
     const tradeId = inserted.id;
 
-    // Insert assets + auto-move picks on the draft board
+    // Track cascading updates
     const pickMoves: Array<{ year: number; round: number; fromTeamId: number; toTeamId: number }> = [];
+    const playerMoves: Array<{ playerName: string; toTeamId: number }> = [];
 
     for (const asset of assets) {
+      // Determine recipient: explicit for 3-team, inferred for 2-team
+      const recipientTeamId = isThreeTeam
+        ? asset.recipientTeamId!
+        : (asset.fromTeamId === teamAId ? teamBId : teamAId);
+
+      const destinationExplicit = isThreeTeam;
+
       if (asset.type === "player") {
         await ctx.integrations.apps_db.execute(
-          `INSERT INTO ffwr_trade_assets (trade_id, from_team_id, asset_type, player_name, player_position)
-           VALUES ($1, $2, 'player', $3, $4)`,
-          [tradeId, asset.fromTeamId, asset.playerName, asset.playerPosition],
+          `INSERT INTO ffwr_trade_assets (trade_id, from_team_id, recipient_team_id, destination_explicit, asset_type, player_name, player_position)
+           VALUES ($1, $2, $3, $4, 'player', $5, $6)`,
+          [tradeId, asset.fromTeamId, recipientTeamId, destinationExplicit, asset.playerName, asset.playerPosition],
           { label: `Insert player asset: ${asset.playerName}` }
         );
+
+        // Track player move for roster cascade
+        if (asset.playerName) {
+          playerMoves.push({ playerName: asset.playerName, toTeamId: recipientTeamId });
+        }
       } else {
         await ctx.integrations.apps_db.execute(
-          `INSERT INTO ffwr_trade_assets (trade_id, from_team_id, asset_type, pick_year, pick_round, pick_number)
-           VALUES ($1, $2, 'pick', $3, $4, $5)`,
-          [tradeId, asset.fromTeamId, asset.pickYear, asset.pickRound, asset.pickNumber],
+          `INSERT INTO ffwr_trade_assets (trade_id, from_team_id, recipient_team_id, destination_explicit, asset_type, pick_year, pick_round, pick_number)
+           VALUES ($1, $2, $3, $4, 'pick', $5, $6, $7)`,
+          [tradeId, asset.fromTeamId, recipientTeamId, destinationExplicit, asset.pickYear, asset.pickRound, asset.pickNumber],
           { label: `Insert pick asset: ${asset.pickYear} Rd ${asset.pickRound}` }
         );
 
-        // Track pick moves: fromTeamId is giving the pick, the other team receives it
+        // Track pick move for draft board + treasury cascade
         if (asset.pickYear && asset.pickRound) {
-          const toTeamId = asset.fromTeamId === teamAId ? teamBId : teamAId;
           pickMoves.push({
             year: asset.pickYear,
             round: asset.pickRound,
             fromTeamId: asset.fromTeamId,
-            toTeamId,
+            toTeamId: recipientTeamId,
           });
         }
       }
     }
 
-    // Auto-move picks on the draft board (The Treasury / Draft Tracker)
-    // Update current_team_id for each traded pick in ffwr_draft_capital
+    // ── Cascade 1: Roster updates (ffwr_players.drafted_team_id) ──
+    for (const move of playerMoves) {
+      await ctx.integrations.apps_db.execute(
+        `UPDATE ffwr_players
+         SET drafted_team_id = $1
+         WHERE LOWER(name) = LOWER($2) AND is_drafted = true`,
+        [move.toTeamId, move.playerName],
+        { label: `Roster move: ${move.playerName} → team ${move.toTeamId}` }
+      );
+    }
+
+    // ── Cascade 2: Draft Board (ffwr_draft_picks.team_id) — current year only ──
+    const CURRENT_DRAFT_YEAR = 2026;
+    for (const move of pickMoves) {
+      if (move.year === CURRENT_DRAFT_YEAR) {
+        await ctx.integrations.apps_db.execute(
+          `UPDATE ffwr_draft_picks
+           SET team_id = $1
+           WHERE round = $2 AND team_id = $3`,
+          [move.toTeamId, move.round, move.fromTeamId],
+          { label: `Draft board: Rd ${move.round} slot → team ${move.toTeamId}` }
+        );
+      }
+    }
+
+    // ── Cascade 3: Treasury (ffwr_draft_capital.current_team_id) ──
     for (const move of pickMoves) {
       await ctx.integrations.apps_db.execute(
         `UPDATE ffwr_draft_capital
          SET current_team_id = $1
          WHERE year = $2 AND round = $3 AND current_team_id = $4`,
         [move.toTeamId, move.year, move.round, move.fromTeamId],
-        { label: `Move pick: ${move.year} Rd ${move.round} → team ${move.toTeamId}` }
+        { label: `Treasury: ${move.year} Rd ${move.round} → team ${move.toTeamId}` }
       );
     }
 
+    // Build summary
+    const parts: string[] = [];
+    if (playerMoves.length > 0) parts.push(`${playerMoves.length} player${playerMoves.length > 1 ? "s" : ""} moved`);
+    if (pickMoves.length > 0) parts.push(`${pickMoves.length} pick${pickMoves.length > 1 ? "s" : ""} reassigned`);
+    const summary = parts.length > 0 ? ` — ${parts.join(", ")}` : "";
+
     return {
-      message: `Trade #${nextTradeNumber} saved successfully!`,
+      message: `Trade #${nextTradeNumber} saved successfully!${summary}`,
       tradeId,
       tradeNumber: nextTradeNumber,
+      playersMovedCount: playerMoves.length,
+      picksMovedCount: pickMoves.length,
     };
   },
 });
