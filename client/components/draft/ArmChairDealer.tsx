@@ -25,6 +25,13 @@ export default function ArmChairDealer() {
     return Array.from(s).sort().reverse() as string[];
   }, [data?.trades]);
 
+  // Build dynasty context for historical trade evaluation
+  // MUST be before early returns — React hooks must run in the same order every render
+  const dynastyCtx: DynastyContext | undefined = useMemo(() => {
+    if (!data?.rookieClasses || data.rookieClasses.length === 0) return undefined;
+    return { rookieClasses: data.rookieClasses, allAdp: data.historicalAdp ?? [] };
+  }, [data?.rookieClasses, data?.historicalAdp]);
+
   if (loading) {
     return (
       <div className="p-6 space-y-4">
@@ -57,12 +64,6 @@ export default function ArmChairDealer() {
   }
 
   const { trades, assets, draftCapital, players, teams, historicalAdp, rookieClasses } = data!;
-
-  // Build dynasty context for historical trade evaluation
-  const dynastyCtx: DynastyContext | undefined = useMemo(() => {
-    if (!rookieClasses || rookieClasses.length === 0) return undefined;
-    return { rookieClasses, allAdp: historicalAdp };
-  }, [rookieClasses, historicalAdp]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">

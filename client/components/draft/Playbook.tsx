@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import DataQualityPanel from "./DataQualityPanel";
 import FormulaDeepDive from "./FormulaDeepDive";
 import { SLIDER_CONFIGS, CATEGORY_LABELS, DEFAULT_MODIFIERS } from "@/lib/trade-modifiers";
 
@@ -107,12 +106,6 @@ export default function Playbook() {
           </p>
         </div>
       ),
-    },
-    {
-      id: "data-quality",
-      icon: "🔬",
-      title: "Data Quality",
-      content: <DataQualityPanel />,
     },
     {
       id: "tips",

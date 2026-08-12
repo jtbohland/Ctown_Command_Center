@@ -4,7 +4,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
 import {
   evaluateHistoricalTrade,
+  evaluateThreeTeamTrade,
+  isThreeTeamTrade,
   buildSeasonAdpMap,
+  getSeasonAdp,
+  calcPlayerValue,
+  calcPickValue,
   SEVERITY_COLORS,
   type TradeRow,
   type TradeAssetRow,
@@ -12,8 +17,10 @@ import {
   type HistoricalAdpRow,
   type VerdictSeverity,
   type TradeValuation,
+  type ThreeTeamValuation,
   type DynastyContext,
 } from "@/lib/trade-utils";
+import ThreeTeamTradeDetail from "./ThreeTeamTradeDetail";
 
 interface Props {
   trades: TradeRow[];
@@ -27,7 +34,10 @@ interface Props {
 interface EvaluatedTrade {
   trade: TradeRow;
   valuation: TradeValuation;
+  threeTeamValuation?: ThreeTeamValuation;
 }
+
+type TradeTypeFilter = "all" | "two_team" | "three_team";
 
 const VERDICT_ORDER: VerdictSeverity[] = ["robbery", "clear", "slight", "fair"];
 
@@ -40,9 +50,22 @@ const VERDICT_META: Record<VerdictSeverity, { title: string; emoji: string; desc
 
 // ─── Small sub-components ─────────────────────────────────────
 
-function AssetChip({ a }: { a: TradeAssetRow }) {
+function getAssetValue(a: TradeAssetRow, tradeSeason: string, seasonAdpMap: Map<string, Map<string, number>>): number {
+  if (a.asset_type === "player") {
+    const adp = a.player_adp_at_trade
+      ? Number(a.player_adp_at_trade)
+      : getSeasonAdp(seasonAdpMap, tradeSeason, a.player_name ?? "");
+    return adp ? calcPlayerValue(adp) : 0;
+  }
+  const year = a.pick_year ?? 2026;
+  const round = a.pick_round ?? 6;
+  return calcPickValue(round, year, a.pick_number ?? undefined);
+}
+
+function AssetWithValue({ a, tradeSeason, seasonAdpMap }: { a: TradeAssetRow; tradeSeason: string; seasonAdpMap: Map<string, Map<string, number>> }) {
+  const val = getAssetValue(a, tradeSeason, seasonAdpMap);
   return (
-    <div className="flex items-center gap-1 pl-1 py-0.5 text-xs">
+    <div className="flex items-center gap-1.5 pl-1 py-0.5 text-xs">
       {a.asset_type === "player" ? (
         <Badge className={`text-[9px] px-1 py-0 ${POSITION_BG_CLASSES[a.player_position ?? ""] ?? "bg-muted"}`}>
           {a.player_position}
@@ -50,11 +73,12 @@ function AssetChip({ a }: { a: TradeAssetRow }) {
       ) : (
         <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/10 border-amber-500/30 text-amber-400">📋</Badge>
       )}
-      <span className="truncate">
+      <span className="truncate flex-1">
         {a.asset_type === "player"
           ? a.player_name
           : formatPickDisplay(a)}
       </span>
+      <span className="text-[10px] font-mono text-muted-foreground shrink-0">({Math.round(val).toLocaleString()})</span>
     </div>
   );
 }
@@ -75,13 +99,14 @@ interface FeaturedTrade {
   et: EvaluatedTrade;
 }
 
-function TradeOfSeasonCard({ label, emoji, et, assets, expandedId, onToggle }: {
+function TradeOfSeasonCard({ label, emoji, et, assets, expandedId, onToggle, seasonAdpMap }: {
   label: string;
   emoji: string;
   et: EvaluatedTrade;
   assets: TradeAssetRow[];
   expandedId: number | null;
   onToggle: (id: number) => void;
+  seasonAdpMap: Map<string, Map<string, number>>;
 }) {
   const { trade, valuation } = et;
   const severity = valuation.verdict.severity;
@@ -129,14 +154,21 @@ function TradeOfSeasonCard({ label, emoji, et, assets, expandedId, onToggle }: {
                 {getTeamEmoji(trade.team_a_name)} {trade.team_a_name} sends
                 <span className="font-mono ml-1 text-muted-foreground">{Math.round(valuation.teamAValue).toLocaleString()} pts</span>
               </div>
-              {teamAAssets.map((a) => <AssetChip key={a.id} a={a} />)}
+              {teamAAssets.map((a) => <AssetWithValue key={a.id} a={a} tradeSeason={trade.season} seasonAdpMap={seasonAdpMap} />)}
+              <div className="mt-1.5 pt-1 border-t border-border/30 flex items-center justify-between">
+                <span className="text-[10px] font-bold text-muted-foreground">Package Total</span>
+                <span className="text-xs font-bold font-mono">{Math.round(valuation.teamAValue).toLocaleString()} pts</span>
+              </div>
             </div>
             <div>
               <div className={`text-[10px] font-bold ${colors.text} mb-1`}>
                 {getTeamEmoji(trade.team_b_name)} {trade.team_b_name} sends
-                <span className="font-mono ml-1 text-muted-foreground">{Math.round(valuation.teamBValue).toLocaleString()} pts</span>
               </div>
-              {teamBAssets.map((a) => <AssetChip key={a.id} a={a} />)}
+              {teamBAssets.map((a) => <AssetWithValue key={a.id} a={a} tradeSeason={trade.season} seasonAdpMap={seasonAdpMap} />)}
+              <div className="mt-1.5 pt-1 border-t border-border/30 flex items-center justify-between">
+                <span className="text-[10px] font-bold text-muted-foreground">Package Total</span>
+                <span className="text-xs font-bold font-mono">{Math.round(valuation.teamBValue).toLocaleString()} pts</span>
+              </div>
             </div>
           </div>
           {valuation.winningTeamName && (
@@ -156,6 +188,7 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
   const [expandedTrade, setExpandedTrade] = useState<number | null>(null);
   const [selectedSeason, setSelectedSeason] = useState<string>("all");
   const [activeFilters, setActiveFilters] = useState<Set<VerdictSeverity>>(new Set(VERDICT_ORDER));
+  const [tradeTypeFilter, setTradeTypeFilter] = useState<TradeTypeFilter>("all");
 
   // Season-aware ADP: season → (player_name → adp_rank)
   const seasonAdpMap = useMemo(() => buildSeasonAdpMap(historicalAdp), [historicalAdp]);
@@ -166,12 +199,26 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
     [trades, selectedSeason]
   );
 
+  // Apply trade type filter
+  const typeFilteredTrades = useMemo(() => {
+    if (tradeTypeFilter === "all") return filteredTrades;
+    return filteredTrades.filter((t) =>
+      tradeTypeFilter === "three_team" ? isThreeTeamTrade(t) : !isThreeTeamTrade(t)
+    );
+  }, [filteredTrades, tradeTypeFilter]);
+
   const evaluated = useMemo<EvaluatedTrade[]>(() => {
-    return filteredTrades.map((trade) => ({
-      trade,
-      valuation: evaluateHistoricalTrade(trade, assets, seasonAdpMap, dynastyCtx),
-    }));
-  }, [filteredTrades, assets, seasonAdpMap, dynastyCtx]);
+    return typeFilteredTrades.map((trade) => {
+      const is3 = isThreeTeamTrade(trade);
+      return {
+        trade,
+        valuation: evaluateHistoricalTrade(trade, assets, seasonAdpMap, dynastyCtx),
+        threeTeamValuation: is3
+          ? evaluateThreeTeamTrade(trade, assets, seasonAdpMap, dynastyCtx)
+          : undefined,
+      };
+    });
+  }, [typeFilteredTrades, assets, seasonAdpMap, dynastyCtx]);
 
   // Group by severity
   const grouped = useMemo(() => {
@@ -225,23 +272,41 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
     return results;
   }, [evaluated]);
 
-  // Manager leaderboard
+  // Three-team count for display
+  const threeTeamCount = useMemo(
+    () => (selectedSeason === "all" ? trades : trades.filter((t) => t.season === selectedSeason)).filter(isThreeTeamTrade).length,
+    [trades, selectedSeason]
+  );
+
+  // Manager leaderboard — includes team C for three-team trades
   const leaderboard = useMemo(() => {
     const board = new Map<string, { wins: number; losses: number; even: number }>();
     for (const et of evaluated) {
-      const { trade, valuation } = et;
-      const teamNames = [trade.team_a_name, trade.team_b_name];
-      for (const name of teamNames) {
-        if (!board.has(name)) board.set(name, { wins: 0, losses: 0, even: 0 });
-      }
-      if (!valuation.winningTeamName) {
-        // Even trade
-        board.get(trade.team_a_name)!.even++;
-        board.get(trade.team_b_name)!.even++;
+      const { trade, threeTeamValuation } = et;
+
+      if (threeTeamValuation) {
+        // Three-team: rank 1 = win, rank 2 = even, rank 3 = loss
+        for (const team of threeTeamValuation.teams) {
+          if (!board.has(team.teamName)) board.set(team.teamName, { wins: 0, losses: 0, even: 0 });
+          if (team.rank === 1) board.get(team.teamName)!.wins++;
+          else if (team.rank === 2) board.get(team.teamName)!.even++;
+          else board.get(team.teamName)!.losses++;
+        }
       } else {
-        board.get(valuation.winningTeamName)!.wins++;
-        const loser = valuation.winningTeamName === trade.team_a_name ? trade.team_b_name : trade.team_a_name;
-        board.get(loser)!.losses++;
+        // Two-team
+        const { valuation } = et;
+        const teamNames = [trade.team_a_name, trade.team_b_name];
+        for (const name of teamNames) {
+          if (!board.has(name)) board.set(name, { wins: 0, losses: 0, even: 0 });
+        }
+        if (!valuation.winningTeamName) {
+          board.get(trade.team_a_name)!.even++;
+          board.get(trade.team_b_name)!.even++;
+        } else {
+          board.get(valuation.winningTeamName)!.wins++;
+          const loser = valuation.winningTeamName === trade.team_a_name ? trade.team_b_name : trade.team_a_name;
+          board.get(loser)!.losses++;
+        }
       }
     }
     return Array.from(board.entries())
@@ -279,6 +344,27 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
             ))}
           </SelectContent>
         </Select>
+
+        {/* Trade type filter */}
+        <div className="flex items-center gap-1 bg-muted/30 rounded-full px-1 py-0.5 border border-border/30">
+          {(["all", "two_team", "three_team"] as TradeTypeFilter[]).map((t) => {
+            const label = t === "all" ? "All" : t === "two_team" ? "2-Team" : "3-Way";
+            const count = t === "three_team" ? threeTeamCount : undefined;
+            return (
+              <button
+                key={t}
+                onClick={() => setTradeTypeFilter(t)}
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full transition-all ${
+                  tradeTypeFilter === t
+                    ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {label}{count !== undefined && count > 0 ? ` (${count})` : ""}
+              </button>
+            );
+          })}
+        </div>
 
         {/* Verdict filter toggles */}
         <div className="flex items-center gap-1.5">
@@ -347,6 +433,7 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
                 assets={assets}
                 expandedId={expandedTrade}
                 onToggle={(id) => setExpandedTrade((prev) => (prev === id ? null : id))}
+                seasonAdpMap={seasonAdpMap}
               />
             ))}
           </div>
@@ -420,10 +507,15 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
 
             {/* Trade rows */}
             <div className="space-y-1.5 pl-2">
-              {items.map(({ trade, valuation }) => {
+              {items.map(({ trade, valuation, threeTeamValuation: threeTeamVal }) => {
                 const isExpanded = expandedTrade === trade.id;
                 const teamAAssets = assets.filter((a) => a.trade_id === trade.id && a.from_team_id === trade.team_a_id);
                 const teamBAssets = assets.filter((a) => a.trade_id === trade.id && a.from_team_id === trade.team_b_id);
+
+                const is3Way = isThreeTeamTrade(trade);
+                const displayWinner = is3Way && threeTeamVal
+                  ? threeTeamVal.winner
+                  : null;
 
                 return (
                   <div
@@ -436,16 +528,32 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
                     {/* Compact row */}
                     <div className="flex items-center gap-2 px-3 py-2 text-xs">
                       <span className="font-mono text-muted-foreground w-6 text-[10px]">#{trade.trade_number}</span>
-                      <span className="flex items-center gap-1 min-w-[90px]">
+                      {is3Way && (
+                        <Badge className="text-[8px] px-1 py-0 bg-purple-500/20 text-purple-400 border-purple-500/30 border shrink-0">3-WAY</Badge>
+                      )}
+                      <span className="flex items-center gap-1 min-w-[80px]">
                         {getTeamEmoji(trade.team_a_name)}
                         <span className="truncate font-medium">{trade.team_a_name}</span>
                       </span>
                       <span className="text-muted-foreground text-[10px]">↔</span>
-                      <span className="flex items-center gap-1 min-w-[90px]">
+                      <span className="flex items-center gap-1 min-w-[80px]">
                         {getTeamEmoji(trade.team_b_name)}
                         <span className="truncate font-medium">{trade.team_b_name}</span>
                       </span>
-                      {valuation.winningTeamName ? (
+                      {is3Way && trade.team_c_name && (
+                        <>
+                          <span className="text-muted-foreground text-[10px]">↔</span>
+                          <span className="flex items-center gap-1 min-w-[80px]">
+                            {getTeamEmoji(trade.team_c_name)}
+                            <span className="truncate font-medium">{trade.team_c_name}</span>
+                          </span>
+                        </>
+                      )}
+                      {is3Way && displayWinner ? (
+                        <span className={`text-[10px] font-bold ml-auto ${colors.text}`}>
+                          {getTeamEmoji(displayWinner.teamName)} 👑 +{Math.round(displayWinner.netValue).toLocaleString()}
+                        </span>
+                      ) : valuation.winningTeamName ? (
                         <span className={`text-[10px] font-bold ml-auto ${colors.text}`}>
                           {getTeamEmoji(valuation.winningTeamName)} +{Math.abs(valuation.pctDifference)}%
                         </span>
@@ -458,26 +566,53 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
                     {/* Expanded detail */}
                     {isExpanded && (
                       <div className={`border-t ${colors.border} px-3 py-3`}>
-                        <div className="grid grid-cols-2 gap-4 text-xs">
-                          <div>
-                            <div className={`text-[10px] font-bold ${colors.text} mb-1`}>
-                              {getTeamEmoji(trade.team_a_name)} {trade.team_a_name} sends →
-                              <span className="font-mono ml-1 text-muted-foreground">{Math.round(valuation.teamAValue).toLocaleString()} pts</span>
+                        {is3Way ? (
+                          <ThreeTeamTradeDetail
+                            trade={trade}
+                            assets={assets}
+                            seasonAdpMap={seasonAdpMap}
+                            dynastyCtx={dynastyCtx}
+                          />
+                        ) : (
+                          /* Two-team expanded detail */
+                          <>
+                            <div className="grid grid-cols-2 gap-4 text-xs">
+                              <div>
+                                <div className={`text-[10px] font-bold ${colors.text} mb-1`}>
+                                  {getTeamEmoji(trade.team_a_name)} {trade.team_a_name} sends →
+                                </div>
+                                {teamAAssets.map((a) => <AssetWithValue key={a.id} a={a} tradeSeason={trade.season} seasonAdpMap={seasonAdpMap} />)}
+                                <div className="mt-1.5 pt-1 border-t border-border/30 flex items-center justify-between">
+                                  <span className="text-[10px] font-bold text-muted-foreground">Package Total</span>
+                                  <span className="text-xs font-bold font-mono">{Math.round(valuation.teamAValue).toLocaleString()} pts</span>
+                                </div>
+                                {valuation.winningTeamId === trade.team_a_id && (
+                                  <Badge className="text-[9px] px-1.5 py-0 bg-emerald-500/20 text-emerald-400 border-emerald-500/30 border mt-1.5 w-fit">WINNER</Badge>
+                                )}
+                              </div>
+                              <div>
+                                <div className={`text-[10px] font-bold ${colors.text} mb-1`}>
+                                  {getTeamEmoji(trade.team_b_name)} {trade.team_b_name} sends →
+                                </div>
+                                {teamBAssets.map((a) => <AssetWithValue key={a.id} a={a} tradeSeason={trade.season} seasonAdpMap={seasonAdpMap} />)}
+                                <div className="mt-1.5 pt-1 border-t border-border/30 flex items-center justify-between">
+                                  <span className="text-[10px] font-bold text-muted-foreground">Package Total</span>
+                                  <span className="text-xs font-bold font-mono">{Math.round(valuation.teamBValue).toLocaleString()} pts</span>
+                                </div>
+                                {valuation.winningTeamId === trade.team_b_id && (
+                                  <Badge className="text-[9px] px-1.5 py-0 bg-emerald-500/20 text-emerald-400 border-emerald-500/30 border mt-1.5 w-fit">WINNER</Badge>
+                                )}
+                              </div>
                             </div>
-                            {teamAAssets.map((a) => <AssetChip key={a.id} a={a} />)}
-                          </div>
-                          <div>
-                            <div className={`text-[10px] font-bold ${colors.text} mb-1`}>
-                              {getTeamEmoji(trade.team_b_name)} {trade.team_b_name} sends →
-                              <span className="font-mono ml-1 text-muted-foreground">{Math.round(valuation.teamBValue).toLocaleString()} pts</span>
-                            </div>
-                            {teamBAssets.map((a) => <AssetChip key={a.id} a={a} />)}
-                          </div>
-                        </div>
-                        {valuation.winningTeamName && (
-                          <div className={`mt-2 text-center text-[10px] font-extrabold ${colors.text} tracking-widest uppercase`}>
-                            🏆 Winner: {valuation.winningTeamName}
-                          </div>
+                            {valuation.winningTeamName && (
+                              <div className={`mt-3 pt-2 border-t border-border/30 text-center text-[11px] font-bold`}>
+                                {getTeamEmoji(valuation.winningTeamName)} <span className="text-emerald-400">{valuation.winningTeamName}</span>
+                                <span className="text-muted-foreground"> receives </span>
+                                <span className="font-mono text-emerald-400">+{Math.abs(Math.round(valuation.teamAValue - valuation.teamBValue)).toLocaleString()}</span>
+                                <span className="text-muted-foreground"> more value ({Math.abs(valuation.pctDifference)}% gap)</span>
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                     )}

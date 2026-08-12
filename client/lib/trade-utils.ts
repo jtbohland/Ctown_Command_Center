@@ -122,6 +122,12 @@ export interface TradeRow {
   status: string;
   period: string;
   notes: string | null;
+  // Three-team support
+  team_c_id: number | null;
+  team_c_name: string | null;
+  trade_type: string | null;
+  participant_count: number | null;
+  three_team_complete: boolean | null;
 }
 
 export interface TradeAssetRow {
@@ -135,6 +141,9 @@ export interface TradeAssetRow {
   pick_year: number | null;
   pick_round: number | null;
   pick_number: number | null;
+  // Three-team support
+  recipient_team_id: number | null;
+  destination_explicit: boolean | null;
 }
 
 export interface TeamRow {
@@ -189,6 +198,31 @@ export interface TradeValuation {
   verdict: Verdict;
   winningTeamId: number | null;
   winningTeamName: string | null;
+}
+
+// ─── Three-Team Trade Types ──────────────────────────────────
+
+export interface TeamValuationResult {
+  teamId: number;
+  teamName: string;
+  sentValue: number;
+  receivedValue: number;
+  netValue: number;
+  rank: number; // 1 = best deal, 3 = worst
+}
+
+export interface ThreeTeamValuation {
+  teams: [TeamValuationResult, TeamValuationResult, TeamValuationResult];
+  winner: TeamValuationResult;
+  winnerMarginOverSecond: number;
+  conservationCheck: number; // sum of net values — should be ~0
+  verdict: Verdict;
+  valuation_complete: boolean;
+}
+
+/** Type guard: is this trade a three-team trade? */
+export function isThreeTeamTrade(trade: TradeRow): boolean {
+  return trade.trade_type === "three_team" && trade.participant_count === 3;
 }
 
 // ─── Dynasty Multiplier Helper ───────────────────────────────
@@ -327,4 +361,127 @@ export function evaluateHistoricalTrade(
   }
 
   return { teamAValue, teamBValue, pctDifference, verdict, winningTeamId, winningTeamName };
+}
+
+// ─── Three-Team Trade Valuation ──────────────────────────────
+
+/** Compute the value of a single asset using season ADP + optional dynasty modifiers */
+function computeAssetValue(
+  a: TradeAssetRow,
+  tradeSeason: string,
+  seasonMap: Map<string, number> | undefined,
+  dynastyCtx?: DynastyContext,
+): number {
+  if (a.asset_type === "player") {
+    const adp = a.player_adp_at_trade
+      ? Number(a.player_adp_at_trade)
+      : seasonMap?.get(normalizeName(a.player_name ?? "")) ?? null;
+    let value = adp ? calcPlayerValue(adp) : 0;
+    if (dynastyCtx && a.player_name && value > 0) {
+      value = applyDynastyMultiplier(
+        value,
+        a.player_name,
+        a.player_position,
+        adp,
+        tradeSeason,
+        dynastyCtx,
+      );
+    }
+    return value;
+  }
+  const year = a.pick_year;
+  const round = a.pick_round ?? 6;
+  if (year === null || year === undefined) return 0;
+  return calcPickValue(round, year, a.pick_number ?? undefined);
+}
+
+/**
+ * Evaluate a three-team trade.
+ * Uses recipient_team_id to attribute value: each asset is "sent" by from_team_id
+ * and "received" by recipient_team_id. Net = received − sent.
+ */
+export function evaluateThreeTeamTrade(
+  trade: TradeRow,
+  assets: TradeAssetRow[],
+  seasonAdpMap: Map<string, Map<string, number>>,
+  dynastyCtx?: DynastyContext,
+): ThreeTeamValuation {
+  const tradeAssets = assets.filter((a) => a.trade_id === trade.id);
+  const seasonMap = seasonAdpMap.get(trade.season);
+
+  // Collect all participant team IDs and names
+  const teamMap = new Map<number, string>();
+  teamMap.set(trade.team_a_id, trade.team_a_name);
+  teamMap.set(trade.team_b_id, trade.team_b_name);
+  if (trade.team_c_id && trade.team_c_name) {
+    teamMap.set(trade.team_c_id, trade.team_c_name);
+  }
+
+  // Initialize sent/received accumulators per team
+  const sent = new Map<number, number>();
+  const received = new Map<number, number>();
+  for (const teamId of teamMap.keys()) {
+    sent.set(teamId, 0);
+    received.set(teamId, 0);
+  }
+
+  // Attribute each asset's value
+  for (const asset of tradeAssets) {
+    const val = computeAssetValue(asset, trade.season, seasonMap, dynastyCtx);
+    if (val <= 0) continue;
+
+    // Sent by from_team_id
+    sent.set(asset.from_team_id, (sent.get(asset.from_team_id) ?? 0) + val);
+
+    // Received by recipient_team_id (should always be set for three-team trades)
+    const recipient = asset.recipient_team_id;
+    if (recipient) {
+      received.set(recipient, (received.get(recipient) ?? 0) + val);
+    }
+  }
+
+  // Build team results
+  const results: TeamValuationResult[] = [];
+  for (const [teamId, teamName] of teamMap.entries()) {
+    const s = sent.get(teamId) ?? 0;
+    const r = received.get(teamId) ?? 0;
+    results.push({
+      teamId,
+      teamName,
+      sentValue: s,
+      receivedValue: r,
+      netValue: r - s,
+      rank: 0, // set below
+    });
+  }
+
+  // Sort by net value descending — best deal first
+  results.sort((a, b) => b.netValue - a.netValue);
+  results.forEach((r, i) => { r.rank = i + 1; });
+
+  // Pad to exactly 3 if somehow fewer (shouldn't happen)
+  while (results.length < 3) {
+    results.push({ teamId: 0, teamName: "Unknown", sentValue: 0, receivedValue: 0, netValue: 0, rank: results.length + 1 });
+  }
+
+  const winner = results[0];
+  const second = results[1];
+  const winnerMarginOverSecond = winner.netValue - second.netValue;
+  const conservationCheck = results.reduce((sum, r) => sum + r.netValue, 0);
+
+  // Verdict: use the margin between winner and worst-off team as pct of total value
+  const totalValueMoved = Array.from(sent.values()).reduce((a, b) => a + b, 0);
+  const spreadPct = totalValueMoved > 0
+    ? Math.round(((winner.netValue - results[2].netValue) / totalValueMoved) * 100 * 10) / 10
+    : 0;
+  const verdict = getVerdict(spreadPct);
+
+  return {
+    teams: results.slice(0, 3) as [TeamValuationResult, TeamValuationResult, TeamValuationResult],
+    winner,
+    winnerMarginOverSecond,
+    conservationCheck,
+    verdict,
+    valuation_complete: true,
+  };
 }

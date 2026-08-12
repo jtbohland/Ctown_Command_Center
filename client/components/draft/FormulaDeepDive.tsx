@@ -149,7 +149,8 @@ export default function FormulaDeepDive() {
     const avg = (aTotal + bTotal) / 2;
     const pct = avg > 0 ? ((bTotal - aTotal) / avg) * 100 : 0;
     const v = getVerdict(pct);
-    const w = Math.abs(pct) <= 5 ? null : pct > 0 ? "Team B" : "Team A";
+    // The team that SENDS less value RECEIVES more → they win
+    const w = Math.abs(pct) <= 5 ? null : aTotal > bTotal ? "Team B" : "Team A";
     return {
       teamABreakdowns: aBreaks,
       teamBBreakdowns: bBreaks,
