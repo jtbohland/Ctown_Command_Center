@@ -4,6 +4,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
 import {
   evaluateHistoricalTrade,
+  evaluateThreeTeamTrade,
+  isThreeTeamTrade,
   buildSeasonAdpMap,
   getSeasonAdp,
   calcPlayerValue,
@@ -16,6 +18,7 @@ import {
   type VerdictSeverity,
   type DynastyContext,
 } from "@/lib/trade-utils";
+import ThreeTeamTradeDetail from "./ThreeTeamTradeDetail";
 
 interface Props {
   trades: TradeRow[];
@@ -108,10 +111,15 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
                 {/* Trade # */}
                 <span className="text-[11px] font-mono text-muted-foreground">#{trade.trade_number}</span>
 
-                {/* Verdict Badge */}
-                <Badge className={`text-[10px] px-1.5 py-0 font-semibold border ${colors.badge} w-fit whitespace-nowrap`}>
-                  {valuation.verdict.emoji} {valuation.verdict.label}
-                </Badge>
+                {/* Verdict Badge + 3-WAY tag */}
+                <div className="flex items-center gap-1">
+                  <Badge className={`text-[10px] px-1.5 py-0 font-semibold border ${colors.badge} whitespace-nowrap`}>
+                    {valuation.verdict.emoji} {valuation.verdict.label}
+                  </Badge>
+                  {isThreeTeamTrade(trade) && (
+                    <Badge className="text-[8px] px-1 py-0 bg-purple-500/20 text-purple-400 border-purple-500/30 border shrink-0">3-WAY</Badge>
+                  )}
+                </div>
 
                 {/* Team A */}
                 <span className="text-xs font-medium flex items-center gap-1.5 min-w-0">
@@ -122,15 +130,22 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
                   )}
                 </span>
 
-                {/* Team B */}
+                {/* Team B (+ Team C for 3-way) */}
                 <span className="text-xs font-medium flex items-center gap-1.5 min-w-0">
                   {getTeamEmoji(trade.team_b_name)}
                   <span className="truncate">{trade.team_b_name}</span>
                   {valuation.winningTeamId === trade.team_b_id && (
                     <Badge className="text-[8px] px-1 py-0 bg-emerald-500/20 text-emerald-400 border-emerald-500/30 border ml-0.5 shrink-0">WIN</Badge>
                   )}
-                  {absDiff <= 5 && (
+                  {!isThreeTeamTrade(trade) && absDiff <= 5 && (
                     <Badge className="text-[8px] px-1 py-0 bg-emerald-500/20 text-emerald-400 border-emerald-500/30 border ml-0.5 shrink-0">EVEN</Badge>
+                  )}
+                  {isThreeTeamTrade(trade) && trade.team_c_name && (
+                    <>
+                      <span className="text-muted-foreground text-[10px]">+</span>
+                      <span>{getTeamEmoji(trade.team_c_name)}</span>
+                      <span className="truncate">{trade.team_c_name}</span>
+                    </>
                   )}
                 </span>
 
@@ -148,14 +163,25 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
 
               {/* Expanded Detail */}
               {isExpanded && (
-                <ExpandedTradeDetail
-                  trade={trade}
-                  assets={assets}
-                  valuation={valuation}
-                  teams={teams}
-                  colors={colors}
-                  seasonAdpMap={seasonAdpMap}
-                />
+                isThreeTeamTrade(trade) ? (
+                  <div className={`ml-4 mr-4 mb-2 mt-1 border-t ${colors.border} ${colors.bg} rounded-b-lg px-4 py-3`}>
+                    <ThreeTeamTradeDetail
+                      trade={trade}
+                      assets={assets}
+                      seasonAdpMap={seasonAdpMap}
+                      dynastyCtx={dynastyCtx}
+                    />
+                  </div>
+                ) : (
+                  <ExpandedTradeDetail
+                    trade={trade}
+                    assets={assets}
+                    valuation={valuation}
+                    teams={teams}
+                    colors={colors}
+                    seasonAdpMap={seasonAdpMap}
+                  />
+                )
               )}
             </div>
           );

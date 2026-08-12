@@ -9,17 +9,24 @@ const TradeSchema = z.object({
   trade_date: z.string().nullable(),
   team_a_id: z.coerce.number(),
   team_b_id: z.coerce.number(),
+  team_c_id: z.coerce.number().nullable(),
   team_a_name: z.string(),
   team_b_name: z.string(),
+  team_c_name: z.string().nullable(),
   status: z.string(),
   period: z.string(),
   notes: z.string().nullable(),
+  trade_type: z.string().nullable(),
+  participant_count: z.coerce.number().nullable(),
+  three_team_complete: z.boolean().nullable(),
 });
 
 const TradeAssetSchema = z.object({
   id: z.coerce.number(),
   trade_id: z.coerce.number(),
   from_team_id: z.coerce.number(),
+  recipient_team_id: z.coerce.number().nullable(),
+  destination_explicit: z.boolean().nullable(),
   asset_type: z.string(),
   player_name: z.string().nullable(),
   player_position: z.string().nullable(),
@@ -91,12 +98,17 @@ export default api({
 
   async run(ctx) {
     const trades = await ctx.integrations.apps_db.query(
-      `SELECT t.*, 
+      `SELECT t.id, t.trade_number, t.season, t.trade_date,
+        t.team_a_id, t.team_b_id, t.team_c_id,
         ta.team_name as team_a_name, 
-        tb.team_name as team_b_name
+        tb.team_name as team_b_name,
+        tc.team_name as team_c_name,
+        t.status, t.period, t.notes,
+        t.trade_type, t.participant_count, t.three_team_complete
       FROM ffwr_trades t
       JOIN ffwr_teams ta ON ta.id = t.team_a_id
       JOIN ffwr_teams tb ON tb.id = t.team_b_id
+      LEFT JOIN ffwr_teams tc ON tc.id = t.team_c_id
       ORDER BY t.season DESC, t.trade_number DESC
       LIMIT 500`,
       TradeSchema,
@@ -105,7 +117,10 @@ export default api({
     );
 
     const assets = await ctx.integrations.apps_db.query(
-      `SELECT * FROM ffwr_trade_assets ORDER BY trade_id, id LIMIT 2000`,
+      `SELECT id, trade_id, from_team_id, recipient_team_id, destination_explicit,
+        asset_type, player_name, player_position, player_adp_at_trade,
+        pick_year, pick_round, pick_number
+      FROM ffwr_trade_assets ORDER BY trade_id, id LIMIT 2000`,
       TradeAssetSchema,
       undefined,
       { label: "Fetch all trade assets" }
@@ -144,7 +159,7 @@ export default api({
     );
 
     const historicalAdp = await ctx.integrations.apps_db.query(
-      `SELECT player_name, adp_rank, season, position FROM ffwr_historical_adp ORDER BY season, adp_rank LIMIT 1000`,
+      `SELECT player_name, adp_rank, season, position FROM ffwr_historical_adp ORDER BY season, adp_rank LIMIT 6000`,
       HistoricalAdpSchema,
       undefined,
       { label: "Fetch historical ADP with positions" }

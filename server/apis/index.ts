@@ -28,6 +28,9 @@ import SeedRookieClasses from './trades/seed-rookie-classes.js';
 import SeedAdpFromCsv from './trades/seed-adp-from-csv.js';
 import DataQualityCheck from './trades/data-quality-check.js';
 import BackfillPickYear from './trades/backfill-pick-year.js';
+import MigrateThreeTeam from './trades/migrate-three-team.js';
+import BackfillTwoTeamDefaults from './trades/backfill-two-team-defaults.js';
+import RepairThreeTeamTrades from './trades/repair-three-team-trades.js';
 
 const apis = {
   InitDatabase,
@@ -60,6 +63,9 @@ const apis = {
   SeedAdpFromCsv,
   DataQualityCheck,
   BackfillPickYear,
+  MigrateThreeTeam,
+  BackfillTwoTeamDefaults,
+  RepairThreeTeamTrades,
 } as const;
 
 export default apis;
