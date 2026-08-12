@@ -98,14 +98,14 @@ export default api({
       JOIN ffwr_teams ta ON ta.id = t.team_a_id
       JOIN ffwr_teams tb ON tb.id = t.team_b_id
       ORDER BY t.season DESC, t.trade_number DESC
-      LIMIT 200`,
+      LIMIT 500`,
       TradeSchema,
       undefined,
       { label: "Fetch all trades" }
     );
 
     const assets = await ctx.integrations.apps_db.query(
-      `SELECT * FROM ffwr_trade_assets ORDER BY trade_id, id LIMIT 1000`,
+      `SELECT * FROM ffwr_trade_assets ORDER BY trade_id, id LIMIT 2000`,
       TradeAssetSchema,
       undefined,
       { label: "Fetch all trade assets" }
@@ -144,7 +144,7 @@ export default api({
     );
 
     const historicalAdp = await ctx.integrations.apps_db.query(
-      `SELECT player_name, adp_rank, season, position FROM ffwr_historical_adp ORDER BY season, adp_rank LIMIT 300`,
+      `SELECT player_name, adp_rank, season, position FROM ffwr_historical_adp ORDER BY season, adp_rank LIMIT 1000`,
       HistoricalAdpSchema,
       undefined,
       { label: "Fetch historical ADP with positions" }

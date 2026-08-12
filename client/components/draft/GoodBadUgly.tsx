@@ -4,6 +4,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
 import {
   evaluateHistoricalTrade,
+  buildSeasonAdpMap,
   SEVERITY_COLORS,
   type TradeRow,
   type TradeAssetRow,
@@ -156,14 +157,8 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
   const [selectedSeason, setSelectedSeason] = useState<string>("all");
   const [activeFilters, setActiveFilters] = useState<Set<VerdictSeverity>>(new Set(VERDICT_ORDER));
 
-  // Build ADP lookup keyed by player name
-  const adpMap = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const row of historicalAdp) {
-      m.set(row.player_name.toLowerCase(), row.adp_rank);
-    }
-    return m;
-  }, [historicalAdp]);
+  // Season-aware ADP: season → (player_name → adp_rank)
+  const seasonAdpMap = useMemo(() => buildSeasonAdpMap(historicalAdp), [historicalAdp]);
 
   // Filter trades by season, then evaluate each
   const filteredTrades = useMemo(
@@ -174,9 +169,9 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
   const evaluated = useMemo<EvaluatedTrade[]>(() => {
     return filteredTrades.map((trade) => ({
       trade,
-      valuation: evaluateHistoricalTrade(trade, assets, adpMap, dynastyCtx),
+      valuation: evaluateHistoricalTrade(trade, assets, seasonAdpMap, dynastyCtx),
     }));
-  }, [filteredTrades, assets, adpMap, dynastyCtx]);
+  }, [filteredTrades, assets, seasonAdpMap, dynastyCtx]);
 
   // Group by severity
   const grouped = useMemo(() => {

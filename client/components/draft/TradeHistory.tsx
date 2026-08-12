@@ -4,6 +4,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
 import {
   evaluateHistoricalTrade,
+  buildSeasonAdpMap,
+  getSeasonAdp,
   calcPlayerValue,
   calcPickValue,
   SEVERITY_COLORS,
@@ -31,20 +33,15 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
   const [page, setPage] = useState(0);
   const [expandedTrade, setExpandedTrade] = useState<number | null>(null);
 
-  const adpMap = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const row of historicalAdp) {
-      m.set(row.player_name.toLowerCase(), row.adp_rank);
-    }
-    return m;
-  }, [historicalAdp]);
+  // Season-aware ADP: season → (player_name → adp_rank)
+  const seasonAdpMap = useMemo(() => buildSeasonAdpMap(historicalAdp), [historicalAdp]);
 
   const tradesWithVerdicts = useMemo(() => {
     return trades.map((trade) => ({
       trade,
-      valuation: evaluateHistoricalTrade(trade, assets, adpMap, dynastyCtx),
+      valuation: evaluateHistoricalTrade(trade, assets, seasonAdpMap, dynastyCtx),
     }));
-  }, [trades, assets, adpMap, dynastyCtx]);
+  }, [trades, assets, seasonAdpMap, dynastyCtx]);
 
   const filteredTrades = useMemo(() => {
     if (seasonFilter === "all") return tradesWithVerdicts;
@@ -157,7 +154,7 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
                   valuation={valuation}
                   teams={teams}
                   colors={colors}
-                  adpMap={adpMap}
+                  seasonAdpMap={seasonAdpMap}
                 />
               )}
             </div>
@@ -198,14 +195,14 @@ function ExpandedTradeDetail({
   valuation,
   teams,
   colors,
-  adpMap,
+  seasonAdpMap,
 }: {
   trade: TradeRow;
   assets: TradeAssetRow[];
   valuation: any;
   teams: TeamRow[];
   colors: any;
-  adpMap: Map<string, number>;
+  seasonAdpMap: Map<string, Map<string, number>>;
 }) {
   const teamAAssets = assets.filter((a) => a.trade_id === trade.id && a.from_team_id === trade.team_a_id);
   const teamBAssets = assets.filter((a) => a.trade_id === trade.id && a.from_team_id === trade.team_b_id);
@@ -218,14 +215,16 @@ function ExpandedTradeDetail({
           assets={teamAAssets}
           totalValue={valuation.teamAValue}
           isWinner={valuation.winningTeamId === trade.team_a_id}
-          adpMap={adpMap}
+          tradeSeason={trade.season}
+          seasonAdpMap={seasonAdpMap}
         />
         <AssetColumn
           teamName={trade.team_b_name}
           assets={teamBAssets}
           totalValue={valuation.teamBValue}
           isWinner={valuation.winningTeamId === trade.team_b_id}
-          adpMap={adpMap}
+          tradeSeason={trade.season}
+          seasonAdpMap={seasonAdpMap}
         />
       </div>
       {/* Gap + Winner summary */}
@@ -254,11 +253,11 @@ function formatPickLabel(a: TradeAssetRow): string {
   return parts.join(" ");
 }
 
-function getAssetValue(a: TradeAssetRow, adpMap: Map<string, number>): number {
+function getAssetValue(a: TradeAssetRow, tradeSeason: string, seasonAdpMap: Map<string, Map<string, number>>): number {
   if (a.asset_type === "player") {
     const adp = a.player_adp_at_trade
       ? Number(a.player_adp_at_trade)
-      : adpMap.get((a.player_name ?? "").toLowerCase()) ?? null;
+      : getSeasonAdp(seasonAdpMap, tradeSeason, a.player_name ?? "");
     return adp ? calcPlayerValue(adp) : 0;
   }
   const year = a.pick_year ?? 2026;
@@ -271,13 +270,15 @@ function AssetColumn({
   assets,
   totalValue,
   isWinner,
-  adpMap,
+  tradeSeason,
+  seasonAdpMap,
 }: {
   teamName: string;
   assets: TradeAssetRow[];
   totalValue: number;
   isWinner: boolean;
-  adpMap: Map<string, number>;
+  tradeSeason: string;
+  seasonAdpMap: Map<string, Map<string, number>>;
 }) {
   return (
     <div>
@@ -286,7 +287,7 @@ function AssetColumn({
       </div>
       <div className="space-y-1">
         {assets.map((a) => {
-          const val = getAssetValue(a, adpMap);
+          const val = getAssetValue(a, tradeSeason, seasonAdpMap);
           return (
             <div key={a.id} className="flex items-center gap-1.5 text-xs">
               {a.asset_type === "player" ? (
