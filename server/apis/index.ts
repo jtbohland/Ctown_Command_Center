@@ -31,6 +31,9 @@ import BackfillPickYear from './trades/backfill-pick-year.js';
 import MigrateThreeTeam from './trades/migrate-three-team.js';
 import BackfillTwoTeamDefaults from './trades/backfill-two-team-defaults.js';
 import RepairThreeTeamTrades from './trades/repair-three-team-trades.js';
+import InitSeasonActuals from './trades/init-season-actuals.js';
+import SeedSeasonActuals from './trades/seed-season-actuals.js';
+
 
 const apis = {
   InitDatabase,
@@ -66,6 +69,8 @@ const apis = {
   MigrateThreeTeam,
   BackfillTwoTeamDefaults,
   RepairThreeTeamTrades,
+  InitSeasonActuals,
+  SeedSeasonActuals,
 } as const;
 
 export default apis;
