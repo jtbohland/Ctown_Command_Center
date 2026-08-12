@@ -71,10 +71,10 @@ function calcValue(adpRank: number): number {
 
 function getVerdict(pctDiff: number): { label: string; emoji: string; severity: string } {
   const absDiff = Math.abs(pctDiff);
-  if (absDiff <= 5) return { label: "Fair Trade", emoji: "⚖️", severity: "fair" };
-  if (absDiff <= 15) return { label: "Slight Edge", emoji: "📈", severity: "slight" };
-  if (absDiff <= 25) return { label: "Clear Winner", emoji: "🏆", severity: "clear" };
-  return { label: "Highway Robbery", emoji: "🚨", severity: "robbery" };
+  if (absDiff <= 5) return { label: "Fair Catch", emoji: "🧤", severity: "fair" };
+  if (absDiff <= 15) return { label: "Edge Rush", emoji: "📈", severity: "slight" };
+  if (absDiff <= 25) return { label: "Pick Six", emoji: "🏆", severity: "clear" };
+  return { label: "Flag on the Play", emoji: "🚩", severity: "robbery" };
 }
 
 const AssetInputSchema = z.object({
