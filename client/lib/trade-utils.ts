@@ -15,7 +15,18 @@ const YEAR_DISCOUNT: Record<number, number> = {
 };
 
 // ─── Dynasty Multiplier Constants ────────────────────────────
-const ROOKIE_PREMIUM = 1.10;      // Top-50 NFL draft picks in their rookie season
+// Graduated rookie premium: picks 1-128 (NFL rounds 1-4)
+// Pick 1 → 1.20x, pick 128 → ~1.01x (quadratic falloff)
+const ROOKIE_MAX_PICK = 128;
+const ROOKIE_MAX_BOOST = 0.20;    // +20% for #1 overall
+const ROOKIE_MIN_BOOST = 0.01;    // +1% at pick 128
+function getRookiePremium(overallPick: number): number {
+  if (overallPick < 1 || overallPick > ROOKIE_MAX_PICK) return 1.0;
+  // Quadratic falloff: earlier picks get much bigger boost
+  const t = (overallPick - 1) / (ROOKIE_MAX_PICK - 1); // 0 at pick 1, 1 at pick 128
+  const boost = ROOKIE_MIN_BOOST + (ROOKIE_MAX_BOOST - ROOKIE_MIN_BOOST) * Math.pow(1 - t, 2);
+  return 1 + boost;
+}
 const POSITIONAL_SCARCITY = 1.08; // Top-5 QB or TE by ADP
 // Age curve factors
 function getAgeFactor(age: number): number {
@@ -161,14 +172,14 @@ function applyDynastyMultiplier(
   // Season "2024-25" → draft year 2024
   const draftYear = parseInt(tradeSeason.split("-")[0]);
 
-  // 1. Rookie premium: player in this year's NFL draft class, pick ≤ 50
-  const isRookie = ctx.rookieClasses.some(
+  // 1. Graduated rookie premium: player in this year's NFL draft class, picks 1-128 (rounds 1-4)
+  const rookieMatch = ctx.rookieClasses.find(
     (r) =>
       r.nfl_draft_year === draftYear &&
-      r.overall_pick <= 50 &&
+      r.overall_pick <= ROOKIE_MAX_PICK &&
       r.player_name.toLowerCase() === nameLower,
   );
-  if (isRookie) multiplier *= ROOKIE_PREMIUM;
+  if (rookieMatch) multiplier *= getRookiePremium(rookieMatch.overall_pick);
 
   // 2. Positional scarcity: top-5 QB or TE by ADP in that season
   const pos = playerPosition?.toUpperCase() ?? "";
