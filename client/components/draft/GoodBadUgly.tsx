@@ -4,9 +4,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
 import {
   evaluateHistoricalTrade,
+  evaluateHistoricalTradeRetrospective,
   evaluateThreeTeamTrade,
   isThreeTeamTrade,
   buildSeasonAdpMap,
+  buildActualsRankMap,
   getSeasonAdp,
   calcPlayerValue,
   calcPickValue,
@@ -15,10 +17,12 @@ import {
   type TradeAssetRow,
   type TeamRow,
   type HistoricalAdpRow,
+  type PlayerScoreRow,
   type VerdictSeverity,
   type TradeValuation,
   type ThreeTeamValuation,
   type DynastyContext,
+  type ValuationMode,
 } from "@/lib/trade-utils";
 import ThreeTeamTradeDetail from "./ThreeTeamTradeDetail";
 
@@ -29,6 +33,7 @@ interface Props {
   historicalAdp: HistoricalAdpRow[];
   seasons: string[];
   dynastyCtx?: DynastyContext;
+  playerScores: PlayerScoreRow[];
 }
 
 interface EvaluatedTrade {
@@ -184,14 +189,17 @@ function TradeOfSeasonCard({ label, emoji, et, assets, expandedId, onToggle, sea
 
 // ─── Main Component ───────────────────────────────────────────
 
-export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seasons, dynastyCtx }: Props) {
+export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seasons, dynastyCtx, playerScores }: Props) {
   const [expandedTrade, setExpandedTrade] = useState<number | null>(null);
   const [selectedSeason, setSelectedSeason] = useState<string>("all");
   const [activeFilters, setActiveFilters] = useState<Set<VerdictSeverity>>(new Set(VERDICT_ORDER));
   const [tradeTypeFilter, setTradeTypeFilter] = useState<TradeTypeFilter>("all");
+  const [valuationMode, setValuationMode] = useState<ValuationMode>("as-of-trade");
 
   // Season-aware ADP: season → (player_name → adp_rank)
   const seasonAdpMap = useMemo(() => buildSeasonAdpMap(historicalAdp), [historicalAdp]);
+  const actualsRankMap = useMemo(() => buildActualsRankMap(playerScores), [playerScores]);
+  const hasActualsData = playerScores.length > 0;
 
   // Filter trades by season, then evaluate each
   const filteredTrades = useMemo(
@@ -212,7 +220,10 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
       const is3 = isThreeTeamTrade(trade);
       return {
         trade,
-        valuation: evaluateHistoricalTrade(trade, assets, seasonAdpMap, dynastyCtx),
+        valuation:
+          valuationMode === "retrospective" && hasActualsData
+            ? evaluateHistoricalTradeRetrospective(trade, assets, seasonAdpMap, actualsRankMap, dynastyCtx)
+            : evaluateHistoricalTrade(trade, assets, seasonAdpMap, dynastyCtx),
         threeTeamValuation: is3
           ? evaluateThreeTeamTrade(trade, assets, seasonAdpMap, dynastyCtx)
           : undefined,
@@ -387,7 +398,38 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
             );
           })}
         </div>
-        <span className="text-[10px] text-muted-foreground ml-auto font-mono">{total} trades</span>
+        {/* Valuation Mode Toggle */}
+        {hasActualsData && (
+          <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-0.5 border border-border/50">
+            <button
+              onClick={() => setValuationMode("as-of-trade")}
+              className={`text-[10px] px-2.5 py-1 rounded-md font-semibold transition-colors ${
+                valuationMode === "as-of-trade"
+                  ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              📊 ADP
+            </button>
+            <button
+              onClick={() => setValuationMode("retrospective")}
+              className={`text-[10px] px-2.5 py-1 rounded-md font-semibold transition-colors ${
+                valuationMode === "retrospective"
+                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              🎯 Actuals
+            </button>
+          </div>
+        )}
+
+        <span className="text-[10px] text-muted-foreground ml-auto font-mono">
+          {total} trades
+          {valuationMode === "retrospective" && (
+            <span className="text-emerald-400 ml-1">• Retrospective</span>
+          )}
+        </span>
       </div>
 
       {/* ── Stats Banner ── */}

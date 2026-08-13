@@ -63,7 +63,7 @@ export default function ArmChairDealer() {
     );
   }
 
-  const { trades, assets, draftCapital, players, teams, historicalAdp, rookieClasses } = data!;
+  const { trades, assets, draftCapital, players, teams, historicalAdp, rookieClasses, playerScores } = data!;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -101,11 +101,11 @@ export default function ArmChairDealer() {
         </TabsContent>
 
         <TabsContent value="history" className="flex-1 overflow-auto px-5 py-4">
-          <TradeHistory trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} dynastyCtx={dynastyCtx} />
+          <TradeHistory trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} dynastyCtx={dynastyCtx} playerScores={playerScores ?? []} />
         </TabsContent>
 
         <TabsContent value="gbu" className="flex-1 overflow-auto px-5 py-4">
-          <GoodBadUgly trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} dynastyCtx={dynastyCtx} />
+          <GoodBadUgly trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} dynastyCtx={dynastyCtx} playerScores={playerScores ?? []} />
         </TabsContent>
 
         <TabsContent value="siren" className="flex-1 overflow-auto px-5 py-4">

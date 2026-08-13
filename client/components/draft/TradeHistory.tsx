@@ -4,9 +4,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
 import {
   evaluateHistoricalTrade,
+  evaluateHistoricalTradeRetrospective,
   evaluateThreeTeamTrade,
   isThreeTeamTrade,
   buildSeasonAdpMap,
+  buildActualsRankMap,
   getSeasonAdp,
   calcPlayerValue,
   calcPickValue,
@@ -15,8 +17,11 @@ import {
   type TradeAssetRow,
   type TeamRow,
   type HistoricalAdpRow,
+  type PlayerScoreRow,
+  type ActualsAdjustment,
   type VerdictSeverity,
   type DynastyContext,
+  type ValuationMode,
 } from "@/lib/trade-utils";
 import ThreeTeamTradeDetail from "./ThreeTeamTradeDetail";
 
@@ -27,24 +32,33 @@ interface Props {
   historicalAdp: HistoricalAdpRow[];
   seasons: string[];
   dynastyCtx?: DynastyContext;
+  playerScores: PlayerScoreRow[];
 }
 
 const ITEMS_PER_PAGE = 20;
 
-export default function TradeHistory({ trades, assets, teams, historicalAdp, seasons, dynastyCtx }: Props) {
+export default function TradeHistory({ trades, assets, teams, historicalAdp, seasons, dynastyCtx, playerScores }: Props) {
   const [seasonFilter, setSeasonFilter] = useState<string>("all");
   const [page, setPage] = useState(0);
   const [expandedTrade, setExpandedTrade] = useState<number | null>(null);
+  const [valuationMode, setValuationMode] = useState<ValuationMode>("as-of-trade");
 
   // Season-aware ADP: season → (player_name → adp_rank)
   const seasonAdpMap = useMemo(() => buildSeasonAdpMap(historicalAdp), [historicalAdp]);
+  // Season-aware actuals: season → (normalized_name → { rank, ppgPercentile, expectationDelta })
+  const actualsRankMap = useMemo(() => buildActualsRankMap(playerScores), [playerScores]);
+
+  const hasActualsData = playerScores.length > 0;
 
   const tradesWithVerdicts = useMemo(() => {
     return trades.map((trade) => ({
       trade,
-      valuation: evaluateHistoricalTrade(trade, assets, seasonAdpMap, dynastyCtx),
+      valuation:
+        valuationMode === "retrospective" && hasActualsData
+          ? evaluateHistoricalTradeRetrospective(trade, assets, seasonAdpMap, actualsRankMap, dynastyCtx)
+          : evaluateHistoricalTrade(trade, assets, seasonAdpMap, dynastyCtx),
     }));
-  }, [trades, assets, seasonAdpMap, dynastyCtx]);
+  }, [trades, assets, seasonAdpMap, actualsRankMap, dynastyCtx, valuationMode, hasActualsData]);
 
   const filteredTrades = useMemo(() => {
     if (seasonFilter === "all") return tradesWithVerdicts;
@@ -61,7 +75,7 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
   return (
     <div className="space-y-4">
       {/* Header Row */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <h3 className="text-sm font-bold flex items-center gap-1.5">📜 The Ledger</h3>
         <Select value={seasonFilter} onValueChange={(v) => { setSeasonFilter(v); setPage(0); }}>
           <SelectTrigger className="h-8 w-36 text-xs">
@@ -74,8 +88,38 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
             ))}
           </SelectContent>
         </Select>
+
+        {/* Valuation Mode Toggle */}
+        {hasActualsData && (
+          <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-0.5 border border-border/50">
+            <button
+              onClick={() => setValuationMode("as-of-trade")}
+              className={`text-[10px] px-2.5 py-1 rounded-md font-semibold transition-colors ${
+                valuationMode === "as-of-trade"
+                  ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              📊 ADP Mode
+            </button>
+            <button
+              onClick={() => setValuationMode("retrospective")}
+              className={`text-[10px] px-2.5 py-1 rounded-md font-semibold transition-colors ${
+                valuationMode === "retrospective"
+                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              🎯 Actuals Mode
+            </button>
+          </div>
+        )}
+
         <span className="text-xs text-muted-foreground ml-auto font-mono">
           {filteredTrades.length} trades
+          {valuationMode === "retrospective" && (
+            <span className="text-emerald-400 ml-1">• Retrospective</span>
+          )}
         </span>
       </div>
 
@@ -180,6 +224,7 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
                     teams={teams}
                     colors={colors}
                     seasonAdpMap={seasonAdpMap}
+                    valuationMode={valuationMode}
                   />
                 )
               )}
@@ -222,6 +267,7 @@ function ExpandedTradeDetail({
   teams,
   colors,
   seasonAdpMap,
+  valuationMode,
 }: {
   trade: TradeRow;
   assets: TradeAssetRow[];
@@ -229,6 +275,7 @@ function ExpandedTradeDetail({
   teams: TeamRow[];
   colors: any;
   seasonAdpMap: Map<string, Map<string, number>>;
+  valuationMode: ValuationMode;
 }) {
   const teamAAssets = assets.filter((a) => a.trade_id === trade.id && a.from_team_id === trade.team_a_id);
   const teamBAssets = assets.filter((a) => a.trade_id === trade.id && a.from_team_id === trade.team_b_id);
@@ -243,6 +290,8 @@ function ExpandedTradeDetail({
           isWinner={valuation.winningTeamId === trade.team_a_id}
           tradeSeason={trade.season}
           seasonAdpMap={seasonAdpMap}
+          actualsAdjustments={valuation.actualsAdjustments}
+          valuationMode={valuationMode}
         />
         <AssetColumn
           teamName={trade.team_b_name}
@@ -251,6 +300,8 @@ function ExpandedTradeDetail({
           isWinner={valuation.winningTeamId === trade.team_b_id}
           tradeSeason={trade.season}
           seasonAdpMap={seasonAdpMap}
+          actualsAdjustments={valuation.actualsAdjustments}
+          valuationMode={valuationMode}
         />
       </div>
       {/* Gap + Winner summary */}
@@ -298,6 +349,8 @@ function AssetColumn({
   isWinner,
   tradeSeason,
   seasonAdpMap,
+  actualsAdjustments,
+  valuationMode,
 }: {
   teamName: string;
   assets: TradeAssetRow[];
@@ -305,7 +358,20 @@ function AssetColumn({
   isWinner: boolean;
   tradeSeason: string;
   seasonAdpMap: Map<string, Map<string, number>>;
+  actualsAdjustments?: ActualsAdjustment[];
+  valuationMode: ValuationMode;
 }) {
+  // Build adjustments lookup for this column's players
+  const adjustmentsByName = useMemo(() => {
+    const map = new Map<string, ActualsAdjustment>();
+    if (actualsAdjustments) {
+      for (const adj of actualsAdjustments) {
+        map.set(adj.playerName, adj);
+      }
+    }
+    return map;
+  }, [actualsAdjustments]);
+
   return (
     <div>
       <div className="text-[11px] font-bold text-muted-foreground mb-2 flex items-center gap-1.5">
@@ -314,19 +380,39 @@ function AssetColumn({
       <div className="space-y-1">
         {assets.map((a) => {
           const val = getAssetValue(a, tradeSeason, seasonAdpMap);
+          const adj = a.asset_type === "player" && a.player_name ? adjustmentsByName.get(a.player_name) : undefined;
+          const displayValue = valuationMode === "retrospective" && adj ? adj.actualsValue : val;
+
           return (
-            <div key={a.id} className="flex items-center gap-1.5 text-xs">
-              {a.asset_type === "player" ? (
-                <Badge className={`text-[9px] px-1 py-0 ${POSITION_BG_CLASSES[a.player_position ?? ""] ?? "bg-muted"}`}>
-                  {a.player_position}
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/10 border-amber-500/30 text-amber-400">📋</Badge>
+            <div key={a.id} className="space-y-0.5">
+              <div className="flex items-center gap-1.5 text-xs">
+                {a.asset_type === "player" ? (
+                  <Badge className={`text-[9px] px-1 py-0 ${POSITION_BG_CLASSES[a.player_position ?? ""] ?? "bg-muted"}`}>
+                    {a.player_position}
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/10 border-amber-500/30 text-amber-400">📋</Badge>
+                )}
+                <span className="truncate flex-1">
+                  {a.asset_type === "player" ? a.player_name : formatPickLabel(a)}
+                </span>
+                <span className="text-[10px] font-mono text-muted-foreground">({Math.round(displayValue).toLocaleString()})</span>
+              </div>
+              {/* Actuals adjustment detail */}
+              {valuationMode === "retrospective" && adj && (
+                <div className="ml-7 flex items-center gap-2 text-[9px]">
+                  <span className="text-muted-foreground">
+                    ADP #{adj.adpRank ?? "N/A"} → Actual #{adj.actualsRank}
+                  </span>
+                  <span className={adj.delta > 0 ? "text-emerald-400 font-bold" : adj.delta < 0 ? "text-red-400 font-bold" : "text-muted-foreground"}>
+                    {adj.delta > 0 ? "▲" : adj.delta < 0 ? "▼" : "●"}
+                    {adj.delta !== 0 ? ` ${Math.abs(Math.round(adj.delta)).toLocaleString()}` : " same"}
+                  </span>
+                  <span className="text-muted-foreground/70">
+                    PPG: {adj.ppgPercentile.toFixed(0)}th %ile
+                  </span>
+                </div>
               )}
-              <span className="truncate flex-1">
-                {a.asset_type === "player" ? a.player_name : formatPickLabel(a)}
-              </span>
-              <span className="text-[10px] font-mono text-muted-foreground">({Math.round(val).toLocaleString()})</span>
             </div>
           );
         })}
