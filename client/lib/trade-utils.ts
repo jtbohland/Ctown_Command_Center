@@ -2,6 +2,32 @@
 // Computes trade verdicts using ADP baseline + blended actuals from server.
 // Formula: player_value = baseline × (1 - weight) + actualsValue × weight + dynasty_adjustments
 // No toggle — every trade auto-blends based on trade date.
+//
+// 4-State Evidence Model: never assign zero from absence alone.
+// Players missing ADP get a dynamic unranked baseline derived from
+// the bottom-10 ranked players at their position in that season.
+
+import {
+  type AdpEvidence,
+  type AdpEntry,
+  buildSeasonAdpDetailMap,
+  computeUnrankedBaseline,
+  resolveEvidence,
+  type SeasonCoverage,
+} from "./evidence-model";
+
+/** Get max ADP rank from a season's detail map (for export coverage detection) */
+function getSeasonMaxRank(detail?: Map<string, AdpEntry>): number | undefined {
+  if (!detail || detail.size === 0) return undefined;
+  let max = 0;
+  for (const entry of detail.values()) {
+    if (entry.adpRank > max) max = entry.adpRank;
+  }
+  return max;
+}
+
+export type { AdpEvidence, AdpEntry, SeasonCoverage } from "./evidence-model";
+export { buildSeasonAdpDetailMap, buildSeasonCoverageMap } from "./evidence-model";
 
 const BASE_VALUE = 10000;
 const POWER = 0.6;
@@ -24,13 +50,43 @@ function getKeeperOffset(year: number): number {
 
 // ─── Name Normalization ──────────────────────────────────────
 const NAME_CORRECTIONS: Record<string, string> = {
+  // Typos in trade asset data → correct ADP name (post-normalization, i.e. lowercase, no dots/suffixes)
   "patrick maholmes": "patrick mahomes",
   "patrick maholmes ii": "patrick mahomes",
+  "travis ettiene": "travis etienne",
+  "christian mccaffery": "christian mccaffrey",
+  "c mccaffery": "christian mccaffrey",
+  "cordarelle patterson": "cordarrelle patterson",
+  "devonta freemand": "devonta freeman",
+  "marlan mack": "marlon mack",
+  "tetaroia mcmillan": "tetairoa mcmillan",
+  "treyveon henderson": "treveyon henderson",
+  "sterling shepherd": "sterling shepard",
+  "isiah davis": "isaiah davis",
+  // Apostrophe / special char variants
+  "deandre swift": "dandre swift",       // ADP has D'Andre → normalized "dandre swift"
+  // Abbreviated first names → full names
+  "d achane": "devon achane",             // De'Von Achane → normalized "devon achane"
+  "d johnson": "david johnson",
+  "d london": "drake london",
+  "e moore": "elijah moore",
+  "s laporta": "sam laporta",
+  // Nickname / legal name changes
+  "marquise brown": "hollywood brown",    // ADP uses "Hollywood Brown"
+  "robby anderson": "robbie chosen",      // Legal name change
+  "robbie anderson": "robbie chosen",
+  // Typo corrections
+  "kenyon drake": "kenyan drake",
+  "darrell williams": "darrel williams",         // DB has single-L "Darrel"
+  "jacorey croskey-merritt": "jacory croskey-merritt", // ADP uses "Jacory"
+  "jacorey croskey merritt": "jacory croskey-merritt",
 };
 
 export function normalizeName(name: string): string {
   let n = name
     .toLowerCase()
+    .replace(/^exp\.?\s*rights\s*to\s+/i, "")  // Strip "Exp. Rights to" prefix
+    .replace(/\s{2,}\S+$/, "")                  // Strip trailing team abbr ("   LV", "   FA")
     .replace(/[.']/g, "")
     .replace(/\b(jr|sr|ii|iii|iv|v)\b/gi, "")
     .replace(/\s+/g, " ")
@@ -244,6 +300,8 @@ export interface BlendedAuditEntry {
   // Blended result
   blendedValue: number;        // baseline × (1-weight) + actualsValue × weight
   blendDelta: number;          // blendedValue - baselineValue
+  // Evidence model (4-state audit)
+  evidence?: AdpEvidence;
 }
 
 export interface TradeValuation {
@@ -253,6 +311,10 @@ export interface TradeValuation {
   verdict: Verdict;
   winningTeamId: number | null;
   winningTeamName: string | null;
+  // Absolute & relative gap metrics
+  absoluteValueGap: number;       // |teamAValue - teamBValue| — raw point difference
+  tradeSize: number;              // teamAValue + teamBValue — total value moved
+  loserLossPercentage: number;    // absoluteValueGap / loserPackageValue × 100 (how much the losing side overpaid)
   // Blended actuals metadata
   seasonPhase?: string;
   actualsWeight?: number;
@@ -394,30 +456,80 @@ function computeBlendedPlayerValue(
   tradeSeason: string,
   dynastyCtx: DynastyContext | undefined,
   audit: BlendedAuditEntry[] | undefined,
+  seasonAdpDetail?: Map<string, AdpEntry>,
+  unrankedFallbackFactor?: number,
 ): number {
+  // ── Fallback baseline for unranked players ──
+  // If ADP is missing, compute a dynamic unranked baseline instead of leaving at 0.
+  // Rule: "Never assign zero from absence alone."
+  let effectiveBaseline = baselineValue;
+  let fallbackApplied = false;
+  if (effectiveBaseline <= 0 && seasonAdpDetail && unrankedFallbackFactor !== undefined) {
+    // Check for rookie baseline first
+    const nameNorm = normalizeName(playerName);
+    const draftYear = parseInt(tradeSeason.split("-")[0]);
+    const rookieMatch = dynastyCtx?.rookieClasses.find(
+      (r) => r.nfl_draft_year === draftYear && normalizeName(r.player_name) === nameNorm,
+    );
+    if (rookieMatch) {
+      // Confirmed rookie — use pick-based baseline
+      const rookieRank = rookieMatch.overall_pick + getKeeperOffset(draftYear);
+      effectiveBaseline = calcPlayerValue(rookieRank);
+      fallbackApplied = true;
+    } else {
+      // Generic unranked baseline
+      const pos = playerPosition?.toUpperCase() ?? actuals?.position ?? "RB";
+      const result = computeUnrankedBaseline(pos, seasonAdpDetail, seasonAdpDetail, unrankedFallbackFactor);
+      if (result.unrankedBaseline > 0) {
+        effectiveBaseline = result.unrankedBaseline;
+        fallbackApplied = true;
+      }
+    }
+  }
+
   if (!actuals || actuals.actualsWeight === 0) {
     // Preseason or no actuals — use baseline only
-    if (audit && actuals) {
+    if (audit) {
+      const evidence = seasonAdpDetail && unrankedFallbackFactor !== undefined
+        ? resolveEvidence({
+            playerName,
+            playerPosition,
+            adpRank: playerAdp,
+            hasActuals: !!actuals,
+            actualsValue: actuals?.actualsValue ?? null,
+            actualsWeight: 0,
+            baselineBeforeDynasty: effectiveBaseline,
+            baselineAfterDynasty: effectiveBaseline,
+            blendedValue: effectiveBaseline,
+            unrankedFallbackFactor,
+            seasonAdpDetail,
+            rookieClasses: dynastyCtx?.rookieClasses,
+            tradeSeason,
+            seasonMaxRank: getSeasonMaxRank(seasonAdpDetail),
+          })
+        : undefined;
+
       audit.push({
         playerName,
-        position: actuals.position,
+        position: actuals?.position ?? playerPosition ?? "UNKNOWN",
         adpRank: playerAdp,
-        baselineValue,
-        actualsValue: actuals.actualsValue,
+        baselineValue: effectiveBaseline,
+        actualsValue: actuals?.actualsValue ?? 0,
         actualsWeight: 0,
-        seasonPhase: actuals.seasonPhase,
-        lastCompletedWeek: actuals.lastCompletedWeek,
-        cutoffDate: actuals.cutoffDate,
-        cumulativePprPoints: actuals.cumulativePprPoints,
-        gamesPlayed: actuals.gamesPlayed,
-        ppg: actuals.ppg,
-        totalPtsPercentile: actuals.totalPtsPercentile,
-        ppgPercentile: actuals.ppgPercentile,
-        blendedValue: baselineValue,
+        seasonPhase: actuals?.seasonPhase ?? "preseason",
+        lastCompletedWeek: actuals?.lastCompletedWeek ?? 0,
+        cutoffDate: actuals?.cutoffDate ?? "",
+        cumulativePprPoints: actuals?.cumulativePprPoints ?? 0,
+        gamesPlayed: actuals?.gamesPlayed ?? 0,
+        ppg: actuals?.ppg ?? 0,
+        totalPtsPercentile: actuals?.totalPtsPercentile ?? 0,
+        ppgPercentile: actuals?.ppgPercentile ?? 0,
+        blendedValue: effectiveBaseline,
         blendDelta: 0,
+        evidence,
       });
     }
-    return baselineValue;
+    return effectiveBaseline;
   }
 
   const weight = actuals.actualsWeight;
@@ -444,15 +556,53 @@ function computeBlendedPlayerValue(
     );
   }
 
+  // ── Actuals-only cap: prevent unranked player from getting elite valuation ──
+  // If no ADP signal (fallback was used), cap the positive actuals adjustment
+  // so the blended value doesn't exceed the median ranked player value
+  if (fallbackApplied && actualsScaled > effectiveBaseline) {
+    // Cap at 3× the fallback baseline — prevents waiver wire pickup from
+    // being valued like a top-10 pick just from a hot streak
+    const maxActualsScaled = effectiveBaseline * 3;
+    actualsScaled = Math.min(actualsScaled, maxActualsScaled);
+  }
+
+  // ── Sample-size safeguard: dampen weight for small game counts ──
+  // A 1-2 game spike should not drive a full-weight actuals adjustment.
+  // Apply a games-played dampener that reduces effective weight.
+  let effectiveWeight = weight;
+  if (actuals.gamesPlayed < 4) {
+    const gamesDampener = actuals.gamesPlayed / 4; // 0.25 for 1 game, 0.5 for 2, 0.75 for 3
+    effectiveWeight = weight * gamesDampener;
+  }
+
   // Blend: baseline × (1 - weight) + actualsScaled × weight
-  const blendedValue = baselineValue * (1 - weight) + actualsScaled * weight;
+  const blendedValue = effectiveBaseline * (1 - effectiveWeight) + actualsScaled * effectiveWeight;
 
   if (audit) {
+    const evidence = seasonAdpDetail && unrankedFallbackFactor !== undefined
+      ? resolveEvidence({
+          playerName,
+          playerPosition,
+          adpRank: playerAdp,
+          hasActuals: true,
+          actualsValue: actuals.actualsValue,
+          actualsWeight: weight,
+          baselineBeforeDynasty: effectiveBaseline,
+          baselineAfterDynasty: effectiveBaseline,
+          blendedValue,
+          unrankedFallbackFactor,
+          seasonAdpDetail,
+          rookieClasses: dynastyCtx?.rookieClasses,
+          tradeSeason,
+          seasonMaxRank: getSeasonMaxRank(seasonAdpDetail),
+        })
+      : undefined;
+
     audit.push({
       playerName,
       position: actuals.position,
       adpRank: playerAdp,
-      baselineValue,
+      baselineValue: effectiveBaseline,
       actualsValue: actuals.actualsValue,
       actualsWeight: weight,
       seasonPhase: actuals.seasonPhase,
@@ -464,7 +614,8 @@ function computeBlendedPlayerValue(
       totalPtsPercentile: actuals.totalPtsPercentile,
       ppgPercentile: actuals.ppgPercentile,
       blendedValue,
-      blendDelta: blendedValue - baselineValue,
+      blendDelta: blendedValue - effectiveBaseline,
+      evidence,
     });
   }
 
@@ -482,12 +633,15 @@ export function evaluateHistoricalTrade(
   seasonAdpMap: Map<string, Map<string, number>>,
   dynastyCtx?: DynastyContext,
   tradeActualsMap?: Map<number, { meta: TradeActualsResult; players: Map<string, PlayerActualsResult> }>,
+  seasonAdpDetailMap?: Map<string, Map<string, AdpEntry>>,
+  unrankedFallbackFactor?: number,
 ): TradeValuation {
   const tradeAssets = assets.filter((a) => a.trade_id === trade.id);
   const teamAAssets = tradeAssets.filter((a) => a.from_team_id === trade.team_a_id);
   const teamBAssets = tradeAssets.filter((a) => a.from_team_id === trade.team_b_id);
 
   const seasonMap = seasonAdpMap.get(trade.season);
+  const seasonDetail = seasonAdpDetailMap?.get(trade.season);
   const tradeActuals = tradeActualsMap?.get(trade.id);
   const audit: BlendedAuditEntry[] = [];
 
@@ -521,6 +675,8 @@ export function evaluateHistoricalTrade(
           trade.season,
           dynastyCtx,
           audit,
+          seasonDetail,
+          unrankedFallbackFactor,
         );
         return sum + value;
       } else {
@@ -552,6 +708,14 @@ export function evaluateHistoricalTrade(
     }
   }
 
+  const absoluteValueGap = Math.abs(teamAValue - teamBValue);
+  const tradeSize = teamAValue + teamBValue;
+  // Loser loss %: how much the losing side overpaid relative to their own package
+  const loserPackageValue = pctDifference > 0 ? teamBValue : teamAValue;
+  const loserLossPercentage = loserPackageValue > 0
+    ? Math.round((absoluteValueGap / loserPackageValue) * 100 * 10) / 10
+    : 0;
+
   return {
     teamAValue,
     teamBValue,
@@ -559,6 +723,9 @@ export function evaluateHistoricalTrade(
     verdict,
     winningTeamId,
     winningTeamName,
+    absoluteValueGap,
+    tradeSize,
+    loserLossPercentage,
     seasonPhase: tradeActuals?.meta.seasonPhase,
     actualsWeight: tradeActuals?.meta.actualsWeight,
     lastCompletedWeek: tradeActuals?.meta.lastCompletedWeek,
@@ -575,6 +742,8 @@ function computeAssetValue(
   seasonMap: Map<string, number> | undefined,
   dynastyCtx?: DynastyContext,
   tradeActuals?: { meta: TradeActualsResult; players: Map<string, PlayerActualsResult> },
+  seasonAdpDetail?: Map<string, AdpEntry>,
+  unrankedFallbackFactor?: number,
 ): number {
   if (a.asset_type === "player") {
     const adp = a.player_adp_at_trade
@@ -603,6 +772,8 @@ function computeAssetValue(
       tradeSeason,
       dynastyCtx,
       undefined, // no audit for three-team (could add later)
+      seasonAdpDetail,
+      unrankedFallbackFactor,
     );
   }
   const year = a.pick_year;
@@ -620,9 +791,12 @@ export function evaluateThreeTeamTrade(
   seasonAdpMap: Map<string, Map<string, number>>,
   dynastyCtx?: DynastyContext,
   tradeActualsMap?: Map<number, { meta: TradeActualsResult; players: Map<string, PlayerActualsResult> }>,
+  seasonAdpDetailMap?: Map<string, Map<string, AdpEntry>>,
+  unrankedFallbackFactor?: number,
 ): ThreeTeamValuation {
   const tradeAssets = assets.filter((a) => a.trade_id === trade.id);
   const seasonMap = seasonAdpMap.get(trade.season);
+  const seasonDetail = seasonAdpDetailMap?.get(trade.season);
   const tradeActuals = tradeActualsMap?.get(trade.id);
 
   // Collect all participant team IDs and names
@@ -641,7 +815,7 @@ export function evaluateThreeTeamTrade(
   }
 
   for (const asset of tradeAssets) {
-    const val = computeAssetValue(asset, trade.season, seasonMap, dynastyCtx, tradeActuals);
+    const val = computeAssetValue(asset, trade.season, seasonMap, dynastyCtx, tradeActuals, seasonDetail, unrankedFallbackFactor);
     if (val <= 0) continue;
 
     sent.set(asset.from_team_id, (sent.get(asset.from_team_id) ?? 0) + val);

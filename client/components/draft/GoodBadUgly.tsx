@@ -2,11 +2,13 @@ import { useState, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
+import { DEFAULT_MODIFIERS } from "@/lib/trade-modifiers";
 import {
   evaluateHistoricalTrade,
   evaluateThreeTeamTrade,
   isThreeTeamTrade,
   buildSeasonAdpMap,
+  buildSeasonAdpDetailMap,
   getSeasonAdp,
   calcPlayerValue,
   calcPickValue,
@@ -162,6 +164,24 @@ function TradeOfSeasonCard({ label, emoji, et, assets, expandedId, onToggle, sea
             <Badge className="ml-auto text-[9px] px-1.5 py-0 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">EVEN</Badge>
           )}
         </div>
+        {/* Metric pills */}
+        <div className="flex items-center gap-1.5 mt-1.5">
+          <span className="text-[9px] font-mono text-muted-foreground bg-muted/40 rounded px-1.5 py-0.5">
+            Gap: {Math.round(valuation.absoluteValueGap).toLocaleString()} pts
+          </span>
+          <span className="text-[9px] font-mono text-muted-foreground bg-muted/40 rounded px-1.5 py-0.5">
+            Size: {Math.round(valuation.tradeSize).toLocaleString()} pts
+          </span>
+          {valuation.loserLossPercentage > 0 && (
+            <span className={`text-[9px] font-mono rounded px-1.5 py-0.5 ${
+              valuation.loserLossPercentage >= 25 ? "bg-red-500/15 text-red-400" :
+              valuation.loserLossPercentage >= 10 ? "bg-amber-500/15 text-amber-400" :
+              "bg-muted/40 text-muted-foreground"
+            }`}>
+              Overpaid: {valuation.loserLossPercentage}%
+            </span>
+          )}
+        </div>
       </div>
       {/* Expanded detail */}
       {isExpanded && (
@@ -203,13 +223,23 @@ function TradeOfSeasonCard({ label, emoji, et, assets, expandedId, onToggle, sea
 // ─── Main Component ───────────────────────────────────────────
 
 export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seasons, dynastyCtx, tradeActuals }: Props) {
-  const [expandedTrade, setExpandedTrade] = useState<number | null>(null);
+  const [expandedTrades, setExpandedTrades] = useState<Set<number>>(new Set());
+  const toggleExpanded = (id: number) => {
+    setExpandedTrades((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
   const [selectedSeason, setSelectedSeason] = useState<string>("all");
   const [activeFilters, setActiveFilters] = useState<Set<VerdictSeverity>>(new Set(VERDICT_ORDER));
   const [tradeTypeFilter, setTradeTypeFilter] = useState<TradeTypeFilter>("all");
 
   // Season-aware ADP: season → (player_name → adp_rank)
   const seasonAdpMap = useMemo(() => buildSeasonAdpMap(historicalAdp), [historicalAdp]);
+  // Season ADP detail for fallback system
+  const seasonAdpDetailMap = useMemo(() => buildSeasonAdpDetailMap(historicalAdp), [historicalAdp]);
   // Trade actuals map: tradeId → { meta, players }
   const actualsMap = useMemo(() => buildTradeActualsMap(tradeActuals), [tradeActuals]);
 
@@ -232,13 +262,13 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
       const is3 = isThreeTeamTrade(trade);
       return {
         trade,
-        valuation: evaluateHistoricalTrade(trade, assets, seasonAdpMap, dynastyCtx, actualsMap),
+        valuation: evaluateHistoricalTrade(trade, assets, seasonAdpMap, dynastyCtx, actualsMap, seasonAdpDetailMap, DEFAULT_MODIFIERS.unrankedFallbackFactor),
         threeTeamValuation: is3
-          ? evaluateThreeTeamTrade(trade, assets, seasonAdpMap, dynastyCtx, actualsMap)
+          ? evaluateThreeTeamTrade(trade, assets, seasonAdpMap, dynastyCtx, actualsMap, seasonAdpDetailMap, DEFAULT_MODIFIERS.unrankedFallbackFactor)
           : undefined,
       };
     });
-  }, [typeFilteredTrades, assets, seasonAdpMap, dynastyCtx, actualsMap]);
+  }, [typeFilteredTrades, assets, seasonAdpMap, dynastyCtx, actualsMap, seasonAdpDetailMap]);
 
   // Group by severity
   const grouped = useMemo(() => {
@@ -268,30 +298,46 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
     [evaluated]
   );
 
-  // Trade of the Season — biggest robbery, most even
+  // Trade of the Season — biggest robbery (by %), worst absolute loss, most even
   const featuredTrades = useMemo<FeaturedTrade[]>(() => {
-    const tradesWithPlayers = evaluated.filter((et) => {
+    // Exclude test/empty trades (0 value on both sides) and require at least one player
+    const validCandidates = evaluated.filter((et) => {
+      if (et.valuation.tradeSize === 0) return false;
       const tradeAssets = assets.filter((a) => a.trade_id === et.trade.id);
       return tradeAssets.some((a) => a.asset_type === "player");
     });
-    const allSorted = [...tradesWithPlayers].sort(
+    if (validCandidates.length === 0) return [];
+
+    // Most Lopsided by % (relative gap)
+    const byPctDesc = [...validCandidates].sort(
       (a, b) => Math.abs(b.valuation.pctDifference) - Math.abs(a.valuation.pctDifference)
     );
-    const mostLopsided = allSorted[0];
-    const mostEven = [...tradesWithPlayers].sort(
+    const mostLopsidedPct = byPctDesc[0];
+
+    // Worst Absolute Loss (raw point gap)
+    const byAbsDesc = [...validCandidates].sort(
+      (a, b) => b.valuation.absoluteValueGap - a.valuation.absoluteValueGap
+    );
+    const worstAbsLoss = byAbsDesc[0];
+
+    // Most Even Deal (smallest gap)
+    const byPctAsc = [...validCandidates].sort(
       (a, b) => Math.abs(a.valuation.pctDifference) - Math.abs(b.valuation.pctDifference)
-    )[0];
+    );
+    // Pick the most even that isn't already featured as lopsided/worst
+    const usedIds = new Set([mostLopsidedPct?.trade.id, worstAbsLoss?.trade.id].filter(Boolean));
+    const mostEven = byPctAsc.find((et) => !usedIds.has(et.trade.id)) ?? byPctAsc[0];
+
     const results: FeaturedTrade[] = [];
-    if (mostLopsided) {
-      results.push({ label: "Biggest Robbery", emoji: "🚨", et: mostLopsided });
+    if (mostLopsidedPct) {
+      results.push({ label: "Most Lopsided %", emoji: "🚨", et: mostLopsidedPct });
     }
-    if (mostEven && mostEven.trade.id !== mostLopsided?.trade.id) {
+    // Only show "Worst Absolute Loss" if it's a different trade than the % leader
+    if (worstAbsLoss && worstAbsLoss.trade.id !== mostLopsidedPct?.trade.id) {
+      results.push({ label: "Worst Absolute Loss", emoji: "💸", et: worstAbsLoss });
+    }
+    if (mostEven) {
       results.push({ label: "Most Even Deal", emoji: "⚖️", et: mostEven });
-    } else if (evaluated.length > 1) {
-      const nextEven = [...evaluated]
-        .sort((a, b) => Math.abs(a.valuation.pctDifference) - Math.abs(b.valuation.pctDifference))
-        .find((e) => e.trade.id !== mostLopsided?.trade.id);
-      if (nextEven) results.push({ label: "Most Even Deal", emoji: "⚖️", et: nextEven });
     }
     return results;
   }, [evaluated, assets]);
@@ -456,7 +502,7 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
             </h3>
             <div className="flex-1 border-t border-border/40" />
           </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className={`grid grid-cols-1 gap-2 ${featuredTrades.length === 2 ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}>
             {featuredTrades.map((ft) => (
               <TradeOfSeasonCard
                 key={`${ft.label}-${ft.et.trade.id}`}
@@ -464,8 +510,8 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
                 emoji={ft.emoji}
                 et={ft.et}
                 assets={assets}
-                expandedId={expandedTrade}
-                onToggle={(id) => setExpandedTrade((prev) => (prev === id ? null : id))}
+                expandedId={expandedTrades.has(ft.et.trade.id) ? ft.et.trade.id : null}
+                onToggle={toggleExpanded}
                 seasonAdpMap={seasonAdpMap}
               />
             ))}
@@ -538,7 +584,7 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
 
             <div className="space-y-1.5 pl-2">
               {items.map(({ trade, valuation, threeTeamValuation: threeTeamVal }) => {
-                const isExpanded = expandedTrade === trade.id;
+                const isExpanded = expandedTrades.has(trade.id);
                 const teamAAssets = assets.filter((a) => a.trade_id === trade.id && a.from_team_id === trade.team_a_id);
                 const teamBAssets = assets.filter((a) => a.trade_id === trade.id && a.from_team_id === trade.team_b_id);
 
@@ -551,7 +597,7 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
                     className={`rounded-lg border transition-all cursor-pointer ${
                       isExpanded ? `${colors.border} ${colors.bg}` : "border-border/50 hover:border-border hover:bg-muted/20"
                     }`}
-                    onClick={() => setExpandedTrade(isExpanded ? null : trade.id)}
+                    onClick={() => toggleExpanded(trade.id)}
                   >
                     <div className="flex items-center gap-2 px-3 py-2 text-xs">
                       <span className="font-mono text-muted-foreground w-6 text-[10px]">#{trade.trade_number}</span>
@@ -637,11 +683,30 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
                               </div>
                             </div>
                             {valuation.winningTeamName && (
-                              <div className={`mt-3 pt-2 border-t border-border/30 text-center text-[11px] font-bold`}>
-                                {getTeamEmoji(valuation.winningTeamName)} <span className="text-emerald-400">{valuation.winningTeamName}</span>
-                                <span className="text-muted-foreground"> receives </span>
-                                <span className="font-mono text-emerald-400">+{Math.abs(Math.round(valuation.teamAValue - valuation.teamBValue)).toLocaleString()}</span>
-                                <span className="text-muted-foreground"> more value ({Math.abs(valuation.pctDifference)}% gap)</span>
+                              <div className={`mt-3 pt-2 border-t border-border/30 text-center space-y-1`}>
+                                <div className="text-[11px] font-bold">
+                                  {getTeamEmoji(valuation.winningTeamName)} <span className="text-emerald-400">{valuation.winningTeamName}</span>
+                                  <span className="text-muted-foreground"> receives </span>
+                                  <span className="font-mono text-emerald-400">+{Math.round(valuation.absoluteValueGap).toLocaleString()}</span>
+                                  <span className="text-muted-foreground"> more value</span>
+                                </div>
+                                <div className="flex items-center justify-center gap-2">
+                                  <span className="text-[9px] font-mono text-muted-foreground bg-muted/30 rounded px-1.5 py-0.5">
+                                    {Math.abs(valuation.pctDifference)}% gap
+                                  </span>
+                                  <span className="text-[9px] font-mono text-muted-foreground bg-muted/30 rounded px-1.5 py-0.5">
+                                    Trade size: {Math.round(valuation.tradeSize).toLocaleString()}
+                                  </span>
+                                  {valuation.loserLossPercentage > 0 && (
+                                    <span className={`text-[9px] font-mono rounded px-1.5 py-0.5 ${
+                                      valuation.loserLossPercentage >= 25 ? "bg-red-500/15 text-red-400" :
+                                      valuation.loserLossPercentage >= 10 ? "bg-amber-500/15 text-amber-400" :
+                                      "bg-muted/30 text-muted-foreground"
+                                    }`}>
+                                      Overpaid: {valuation.loserLossPercentage}%
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             )}
                           </>

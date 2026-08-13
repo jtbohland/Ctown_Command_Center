@@ -52,10 +52,19 @@ function SliderRow({ config, value, onChange }: { config: SliderConfig; value: n
 
 export default function ModelCustomizer({ modifiers, onChange }: Props) {
   const [isOpen, setIsOpen] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const ADVANCED_CATEGORIES = new Set(["model", "verdict", "fallback"]);
 
   const modifiedCount = useMemo(() => {
     return SLIDER_CONFIGS.filter(
       (c) => Math.abs(modifiers[c.key] - c.defaultValue) >= 0.001,
+    ).length;
+  }, [modifiers]);
+
+  const advancedModifiedCount = useMemo(() => {
+    return SLIDER_CONFIGS.filter(
+      (c) => ADVANCED_CATEGORIES.has(c.category) && Math.abs(modifiers[c.key] - c.defaultValue) >= 0.001,
     ).length;
   }, [modifiers]);
 
@@ -103,7 +112,7 @@ export default function ModelCustomizer({ modifiers, onChange }: Props) {
           {/* Reset button */}
           <div className="flex items-center justify-between">
             <p className="text-[10px] text-muted-foreground">
-              Adjust these sliders to change how the Arm Chair Dealer values players and picks.
+              Adjust these sliders to change how The C-Town Exchange values players and picks.
               Defaults are pre-set to the league's standard model.
             </p>
             {modifiedCount > 0 && (
@@ -118,30 +127,74 @@ export default function ModelCustomizer({ modifiers, onChange }: Props) {
             )}
           </div>
 
-          {/* Slider groups */}
-          {Object.entries(grouped).map(([category, configs]) => {
-            const meta = CATEGORY_LABELS[category as keyof typeof CATEGORY_LABELS];
-            return (
-              <div key={category} className="space-y-3">
-                <div className="flex items-center gap-1.5 border-b border-border/20 pb-1">
-                  <span className="text-sm">{meta.emoji}</span>
-                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                    {meta.label}
-                  </span>
+          {/* Main slider groups (positional, dynasty, history) */}
+          {Object.entries(grouped)
+            .filter(([category]) => !ADVANCED_CATEGORIES.has(category))
+            .map(([category, configs]) => {
+              const meta = CATEGORY_LABELS[category as keyof typeof CATEGORY_LABELS];
+              return (
+                <div key={category} className="space-y-3">
+                  <div className="flex items-center gap-1.5 border-b border-border/20 pb-1">
+                    <span className="text-sm">{meta.emoji}</span>
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                      {meta.label}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+                    {configs.map((config) => (
+                      <SliderRow
+                        key={config.key}
+                        config={config}
+                        value={modifiers[config.key]}
+                        onChange={(v) => handleSliderChange(config.key, v)}
+                      />
+                    ))}
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-                  {configs.map((config) => (
-                    <SliderRow
-                      key={config.key}
-                      config={config}
-                      value={modifiers[config.key]}
-                      onChange={(v) => handleSliderChange(config.key, v)}
-                    />
-                  ))}
+              );
+            })}
+
+          {/* Advanced toggle */}
+          <button
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="w-full flex items-center gap-2 py-2 px-1 text-left border-t border-border/20 hover:bg-muted/20 rounded transition-colors"
+          >
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+              {showAdvanced ? "▼" : "▶"} Advanced Settings
+            </span>
+            {advancedModifiedCount > 0 && (
+              <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-amber-500/20 text-amber-400 border-amber-500/30">
+                {advancedModifiedCount} modified
+              </Badge>
+            )}
+          </button>
+
+          {/* Advanced slider groups (model shape, verdict calibration) */}
+          {showAdvanced && Object.entries(grouped)
+            .filter(([category]) => ADVANCED_CATEGORIES.has(category))
+            .map(([category, configs]) => {
+              const meta = CATEGORY_LABELS[category as keyof typeof CATEGORY_LABELS];
+              return (
+                <div key={category} className="space-y-3">
+                  <div className="flex items-center gap-1.5 border-b border-border/20 pb-1">
+                    <span className="text-sm">{meta.emoji}</span>
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                      {meta.label}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+                    {configs.map((config) => (
+                      <SliderRow
+                        key={config.key}
+                        config={config}
+                        value={modifiers[config.key]}
+                        onChange={(v) => handleSliderChange(config.key, v)}
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
         </div>
       )}
     </div>

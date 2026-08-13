@@ -252,8 +252,8 @@ export default function WarRoom() {
           className="h-7 text-xs px-3"
           onClick={() => setMainView("trade")}
         >
-          🛋️
-          <span className="ml-1">Arm Chair Dealer</span>
+          🫱🏻‍🫲🏽
+          <span className="ml-1">The C-Town Exchange</span>
         </Button>
 
         <div className="flex-1" />
