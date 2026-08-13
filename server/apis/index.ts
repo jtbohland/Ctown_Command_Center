@@ -34,6 +34,8 @@ import RepairThreeTeamTrades from './trades/repair-three-team-trades.js';
 import InitSeasonActuals from './trades/init-season-actuals.js';
 import InitCanonicalPlayers from './trades/init-canonical-players.js';
 import BuildPlayerIdentityMap from './trades/build-player-identity-map.js';
+import InitPlayerScores from './trades/init-player-scores.js';
+import BuildActualsScores from './trades/build-actuals-scores.js';
 import SeedActualsFromFile from './trades/seed-actuals-from-file.js';
 import GetLoadedActualSeasons from './trades/get-loaded-actual-seasons.js';
 
@@ -77,6 +79,8 @@ const apis = {
   GetLoadedActualSeasons,
   InitCanonicalPlayers,
   BuildPlayerIdentityMap,
+  InitPlayerScores,
+  BuildActualsScores,
 } as const;
 
 export default apis;
