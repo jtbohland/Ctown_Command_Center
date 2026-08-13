@@ -27,6 +27,14 @@ export const router = createBrowserRouter([
           }),
       },
       {
+        path: "/seed-actuals",
+        lazy: () =>
+          import("./pages/SeedActuals/index.js").then((mod) => {
+            const Component = mod.default;
+            return { Component };
+          }),
+      },
+      {
         path: "*",
         Component: () => {
           const currentPath = window.location.pathname;

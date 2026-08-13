@@ -32,7 +32,8 @@ import MigrateThreeTeam from './trades/migrate-three-team.js';
 import BackfillTwoTeamDefaults from './trades/backfill-two-team-defaults.js';
 import RepairThreeTeamTrades from './trades/repair-three-team-trades.js';
 import InitSeasonActuals from './trades/init-season-actuals.js';
-import SeedSeasonActuals from './trades/seed-season-actuals.js';
+import SeedActualsFromFile from './trades/seed-actuals-from-file.js';
+import GetLoadedActualSeasons from './trades/get-loaded-actual-seasons.js';
 
 
 const apis = {
@@ -70,7 +71,8 @@ const apis = {
   BackfillTwoTeamDefaults,
   RepairThreeTeamTrades,
   InitSeasonActuals,
-  SeedSeasonActuals,
+  SeedActualsFromFile,
+  GetLoadedActualSeasons,
 } as const;
 
 export default apis;
