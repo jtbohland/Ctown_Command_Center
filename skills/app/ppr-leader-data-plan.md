@@ -1,27 +1,42 @@
 ---
 name: PPR Leader Data Plan
-description: "Future enhancement: import PPR scoring leader CSVs (2018-2026) for
-  in-season trade valuations. Triggered when discussing trade formula, in-season
-  scoring, or player performance data."
+description: "Canonical player-valuation behavior: blended ADP/Actuals formula
+  with trade-date-aware cutoffs. Triggered when discussing trade formula,
+  in-season scoring, player performance data, or actuals valuation."
 accessType: on_demand
 isEnabled: true
 createdAt: 2026-08-11T17:41:46.340Z
 ---
 
-## PPR Leader Data — Planned Enhancement
+## PPR Leader Data — Implemented
 
-**Status:** Design approved, CSVs available (2018-2026), not yet implemented
+**Status:** Phase A complete — `ComputeTradeActuals` API built and validated
 
-**Concept:** Dual-mode valuation based on trade `period`:
-- **Off-season / Draft Day trades** → use ADP rank (pre-season expectations)
-- **In-season trades** → use actual PPR points-per-game rank (reality)
+**Architecture:** Server-side API computes trade-date-aware actuals through cutoff. Client handles display, slider inputs, blending, and calculation audit.
 
-**Approach:** Clean switch (not a blend). The formula `10,000 × (1/rank)^0.6` stays the same — only the rank source changes.
+**Canonical Formula:**
+```
+player_value = baseline × (1 - actuals_weight) + actuals_value × actuals_weight + dynasty_adjustments
+```
 
-**Data needed:** `ffwr_season_stats` table with: `player_name, season, ppg, total_points, games_played, ppg_rank`
+**No ADP/Actuals toggle.** Every trade automatically gets the right blend based on trade date.
 
-**Impact:** Will re-score all historical in-season trades with actual performance data. Some "robberies" may become smart mid-season moves.
+**Phase-based weighting:**
+| Phase | Weeks | Actuals Weight |
+|-------|-------|---------------|
+| Preseason | 0 | 0% |
+| Early | 1-4 | 10-20% |
+| Mid | 5-10 | 25-35% |
+| Late | 11-17/18 | 40-50% |
+| Postseason | all | 85% |
 
-**Fallback:** For players with insufficient game data (injured early, etc.), fall back to ADP.
+**Actuals Value (0-100 normalized):**
+```
+actualsValue = 60% positional total-pts percentile + 40% positional PPG percentile
+```
 
-**Build order:** Complete rookie/age/positional factors first, then add PPR leader data.
+**API:** `ComputeTradeActuals` — accepts array of `{tradeId, season, tradeDate}`, returns per-player cutoff stats, position percentiles, and phase-based weight.
+
+**Data:** `ffwr_season_actuals` has weekly columns (week_1 through week_18) for exact cutoffs. 7 seasons, 4,652 players.
+
+**Next steps:** Client-side integration into trade-utils.ts, UI updates to remove toggle, dealer slider rework.

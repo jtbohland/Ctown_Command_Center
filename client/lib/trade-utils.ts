@@ -1,13 +1,13 @@
-// ─── Trade Valuation Engine (Client-Side Mirror) ─────────────
-// Mirrors server-side formula so we can compute verdicts for historical trades
-// without making N API calls.
+// ─── Trade Valuation Engine (Client-Side) ────────────────────
+// Computes trade verdicts using ADP baseline + blended actuals from server.
+// Formula: player_value = baseline × (1 - weight) + actualsValue × weight + dynasty_adjustments
+// No toggle — every trade auto-blends based on trade date.
 
 const BASE_VALUE = 10000;
 const POWER = 0.6;
 const KEEPERS_PER_TEAM = 4;
 
 // C-Town league size by draft year: 10 teams 2019-2024, 11 teams 2025+
-// Per spec §3: "C-Town had 10 teams for fantasy draft years 2019–2024 and 11 teams for 2025–2026"
 const LEAGUE_SIZE_BY_YEAR: Record<number, number> = {
   2019: 10, 2020: 10, 2021: 10, 2022: 10, 2023: 10, 2024: 10,
   2025: 11, 2026: 11, 2027: 11,
@@ -23,8 +23,6 @@ function getKeeperOffset(year: number): number {
 }
 
 // ─── Name Normalization ──────────────────────────────────────
-// Strips periods, apostrophes, suffixes (Jr/Sr/II/III/IV/V),
-// collapses whitespace, and applies known corrections.
 const NAME_CORRECTIONS: Record<string, string> = {
   "patrick maholmes": "patrick mahomes",
   "patrick maholmes ii": "patrick mahomes",
@@ -33,9 +31,9 @@ const NAME_CORRECTIONS: Record<string, string> = {
 export function normalizeName(name: string): string {
   let n = name
     .toLowerCase()
-    .replace(/[.']/g, "")            // strip periods and apostrophes
-    .replace(/\b(jr|sr|ii|iii|iv|v)\b/gi, "")  // strip suffixes
-    .replace(/\s+/g, " ")            // collapse whitespace
+    .replace(/[.']/g, "")
+    .replace(/\b(jr|sr|ii|iii|iv|v)\b/gi, "")
+    .replace(/\s+/g, " ")
     .trim();
   return NAME_CORRECTIONS[n] ?? n;
 }
@@ -47,20 +45,16 @@ const YEAR_DISCOUNT: Record<number, number> = {
 };
 
 // ─── Dynasty Multiplier Constants ────────────────────────────
-// Graduated rookie premium: picks 1-128 (NFL rounds 1-4)
-// Pick 1 → 1.20x, pick 128 → ~1.01x (quadratic falloff)
 const ROOKIE_MAX_PICK = 128;
-const ROOKIE_MAX_BOOST = 0.20;    // +20% for #1 overall
-const ROOKIE_MIN_BOOST = 0.01;    // +1% at pick 128
+const ROOKIE_MAX_BOOST = 0.20;
+const ROOKIE_MIN_BOOST = 0.01;
 function getRookiePremium(overallPick: number): number {
   if (overallPick < 1 || overallPick > ROOKIE_MAX_PICK) return 1.0;
-  // Quadratic falloff: earlier picks get much bigger boost
-  const t = (overallPick - 1) / (ROOKIE_MAX_PICK - 1); // 0 at pick 1, 1 at pick 128
+  const t = (overallPick - 1) / (ROOKIE_MAX_PICK - 1);
   const boost = ROOKIE_MIN_BOOST + (ROOKIE_MAX_BOOST - ROOKIE_MIN_BOOST) * Math.pow(1 - t, 2);
   return 1 + boost;
 }
-const POSITIONAL_SCARCITY = 1.08; // Top-5 QB or TE by ADP
-// Age curve factors
+const POSITIONAL_SCARCITY = 1.08;
 function getAgeFactor(age: number): number {
   if (age <= 24) return 1.06;
   if (age <= 27) return 1.03;
@@ -122,7 +116,6 @@ export interface TradeRow {
   status: string;
   period: string;
   notes: string | null;
-  // Three-team support
   team_c_id: number | null;
   team_c_name: string | null;
   trade_type: string | null;
@@ -141,7 +134,6 @@ export interface TradeAssetRow {
   pick_year: number | null;
   pick_round: number | null;
   pick_number: number | null;
-  // Three-team support
   recipient_team_id: number | null;
   destination_explicit: boolean | null;
 }
@@ -191,6 +183,69 @@ export interface DynastyContext {
   allAdp: HistoricalAdpRow[];
 }
 
+// ─── Server Actuals Types (from ComputeTradeActuals API) ─────
+export interface PlayerActualsResult {
+  playerName: string;
+  normalizedName: string;
+  position: string;
+  season: string;
+  seasonPhase: string;
+  lastCompletedWeek: number;
+  cutoffDate: string;
+  totalWeeks: number;
+  cumulativePprPoints: number;
+  gamesPlayed: number;
+  ppg: number;
+  totalPtsPercentile: number;
+  ppgPercentile: number;
+  posRankByPts: number;
+  posRankByPpg: number;
+  positionTotal: number;
+  actualsValue: number;     // 0-100 normalized
+  actualsWeight: number;    // 0.0-0.85 phase-based
+  fullSeasonTotalPoints: number;
+  fullSeasonGamesPlayed: number;
+  fullSeasonPpg: number;
+  fullSeasonOverallRank: number;
+  fullSeasonPositionalRank: number;
+}
+
+export interface TradeActualsResult {
+  tradeId: number;
+  tradeSeason: string;
+  tradeDate: string | null;
+  seasonPhase: string;
+  lastCompletedWeek: number;
+  cutoffDate: string;
+  actualsWeight: number;
+  totalWeeks: number;
+  playerActuals: PlayerActualsResult[];
+}
+
+// ─── Blended Audit Trail (per-player calculation breakdown) ──
+export interface BlendedAuditEntry {
+  playerName: string;
+  position: string;
+  // ADP baseline
+  adpRank: number | null;
+  baselineValue: number;       // calcPlayerValue(adpRank) with dynasty multipliers
+  // Actuals from server
+  actualsValue: number;        // 0-100 normalized score from server
+  actualsWeight: number;       // phase-based weight (0.0-0.85)
+  seasonPhase: string;
+  lastCompletedWeek: number;
+  cutoffDate: string;
+  // Through-cutoff stats
+  cumulativePprPoints: number;
+  gamesPlayed: number;
+  ppg: number;
+  totalPtsPercentile: number;
+  ppgPercentile: number;
+  // Blended result
+  blendedValue: number;        // baseline × (1-weight) + actualsValue × weight
+  blendDelta: number;          // blendedValue - baselineValue
+}
+
 export interface TradeValuation {
   teamAValue: number;
   teamBValue: number;
@@ -198,6 +253,11 @@ export interface TradeValuation {
   verdict: Verdict;
   winningTeamId: number | null;
   winningTeamName: string | null;
+  // Blended actuals metadata
+  seasonPhase?: string;
+  actualsWeight?: number;
+  lastCompletedWeek?: number;
+  blendedAudit?: BlendedAuditEntry[];
 }
 
 // ─── Three-Team Trade Types ──────────────────────────────────
@@ -208,16 +268,19 @@ export interface TeamValuationResult {
   sentValue: number;
   receivedValue: number;
   netValue: number;
-  rank: number; // 1 = best deal, 3 = worst
+  rank: number;
 }
 
 export interface ThreeTeamValuation {
   teams: [TeamValuationResult, TeamValuationResult, TeamValuationResult];
   winner: TeamValuationResult;
   winnerMarginOverSecond: number;
-  conservationCheck: number; // sum of net values — should be ~0
+  conservationCheck: number;
   verdict: Verdict;
   valuation_complete: boolean;
+  // Blended actuals metadata
+  seasonPhase?: string;
+  actualsWeight?: number;
 }
 
 /** Type guard: is this trade a three-team trade? */
@@ -236,10 +299,9 @@ function applyDynastyMultiplier(
 ): number {
   let multiplier = 1.0;
   const nameNorm = normalizeName(playerName);
-  // Season "2024-25" → draft year 2024
   const draftYear = parseInt(tradeSeason.split("-")[0]);
 
-  // 1. Graduated rookie premium: player in this year's NFL draft class, picks 1-128 (rounds 1-4)
+  // 1. Graduated rookie premium
   const rookieMatch = ctx.rookieClasses.find(
     (r) =>
       r.nfl_draft_year === draftYear &&
@@ -248,7 +310,7 @@ function applyDynastyMultiplier(
   );
   if (rookieMatch) multiplier *= getRookiePremium(rookieMatch.overall_pick);
 
-  // 2. Positional scarcity: top-5 QB or TE by ADP in that season
+  // 2. Positional scarcity: top-5 QB or TE by ADP
   const pos = playerPosition?.toUpperCase() ?? "";
   if ((pos === "QB" || pos === "TE") && playerAdp !== null) {
     const seasonAdp = ctx.allAdp
@@ -258,7 +320,7 @@ function applyDynastyMultiplier(
     if (posRank >= 0 && posRank < 5) multiplier *= POSITIONAL_SCARCITY;
   }
 
-  // 3. Age curve: compute current age from rookie class data
+  // 3. Age curve
   const rookieEntry = ctx.rookieClasses.find(
     (r) => normalizeName(r.player_name) === nameNorm,
   );
@@ -283,7 +345,7 @@ export function buildSeasonAdpMap(
   return map;
 }
 
-/** Look up a player's ADP for a specific season, returns null if not found */
+/** Look up a player's ADP for a specific season */
 export function getSeasonAdp(
   seasonAdpMap: Map<string, Map<string, number>>,
   season: string,
@@ -292,22 +354,142 @@ export function getSeasonAdp(
   return seasonAdpMap.get(season)?.get(normalizeName(playerName)) ?? null;
 }
 
+// ─── Actuals Map Builder ─────────────────────────────────────
+/** Build a lookup: tradeId → (normalizedPlayerName → PlayerActualsResult) */
+export function buildTradeActualsMap(
+  results: TradeActualsResult[],
+): Map<number, { meta: TradeActualsResult; players: Map<string, PlayerActualsResult> }> {
+  const map = new Map<number, { meta: TradeActualsResult; players: Map<string, PlayerActualsResult> }>();
+  for (const r of results) {
+    const players = new Map<string, PlayerActualsResult>();
+    for (const p of r.playerActuals) {
+      players.set(p.normalizedName, p);
+    }
+    map.set(r.tradeId, { meta: r, players });
+  }
+  return map;
+}
+
+// ─── Blended Asset Value ─────────────────────────────────────
 /**
- * Compute valuation for a historical trade using season-aware ADP data + optional dynasty factors.
- * Each trade is evaluated using the ADP from the season it occurred in.
+ * Compute the blended value for a single player asset.
+ *
+ * Formula: baseline × (1 - weight) + actualsScaled × weight
+ *
+ * actualsValue from server is 0-100 normalized. We scale it to the same
+ * magnitude as the power-law baseline by using a reference mapping:
+ *   actualsScaled = calcPlayerValue(interpolatedRank)
+ *
+ * where interpolatedRank maps the 0-100 percentile to an ADP rank.
+ * 100th percentile → rank 1 (best), 0th percentile → rank totalInPosition.
+ *
+ * This ensures both sides of the blend are on the same power-law scale.
+ */
+function computeBlendedPlayerValue(
+  baselineValue: number,
+  actuals: PlayerActualsResult | undefined,
+  playerName: string,
+  playerPosition: string | null,
+  playerAdp: number | null,
+  tradeSeason: string,
+  dynastyCtx: DynastyContext | undefined,
+  audit: BlendedAuditEntry[] | undefined,
+): number {
+  if (!actuals || actuals.actualsWeight === 0) {
+    // Preseason or no actuals — use baseline only
+    if (audit && actuals) {
+      audit.push({
+        playerName,
+        position: actuals.position,
+        adpRank: playerAdp,
+        baselineValue,
+        actualsValue: actuals.actualsValue,
+        actualsWeight: 0,
+        seasonPhase: actuals.seasonPhase,
+        lastCompletedWeek: actuals.lastCompletedWeek,
+        cutoffDate: actuals.cutoffDate,
+        cumulativePprPoints: actuals.cumulativePprPoints,
+        gamesPlayed: actuals.gamesPlayed,
+        ppg: actuals.ppg,
+        totalPtsPercentile: actuals.totalPtsPercentile,
+        ppgPercentile: actuals.ppgPercentile,
+        blendedValue: baselineValue,
+        blendDelta: 0,
+      });
+    }
+    return baselineValue;
+  }
+
+  const weight = actuals.actualsWeight;
+
+  // Scale actuals percentile (0-100) to power-law value space.
+  // Map percentile to an effective rank: percentile 100 → rank 1, percentile 0 → rank 300
+  // We use the position pool size as the denominator when available.
+  const posTotal = actuals.positionTotal > 0 ? actuals.positionTotal : 300;
+  const effectiveRank = Math.max(1, Math.round(posTotal * (1 - actuals.actualsValue / 100)));
+  // Apply keeper offset to match ADP scale (actuals rank is positional, so add offset)
+  const draftYear = parseInt(tradeSeason.split("-")[0]);
+  const keeperOffset = getKeeperOffset(draftYear);
+  let actualsScaled = calcPlayerValue(effectiveRank + keeperOffset);
+
+  // Apply dynasty multipliers to the actuals-scaled value too
+  if (dynastyCtx && playerName) {
+    actualsScaled = applyDynastyMultiplier(
+      actualsScaled,
+      playerName,
+      playerPosition,
+      playerAdp,
+      tradeSeason,
+      dynastyCtx,
+    );
+  }
+
+  // Blend: baseline × (1 - weight) + actualsScaled × weight
+  const blendedValue = baselineValue * (1 - weight) + actualsScaled * weight;
+
+  if (audit) {
+    audit.push({
+      playerName,
+      position: actuals.position,
+      adpRank: playerAdp,
+      baselineValue,
+      actualsValue: actuals.actualsValue,
+      actualsWeight: weight,
+      seasonPhase: actuals.seasonPhase,
+      lastCompletedWeek: actuals.lastCompletedWeek,
+      cutoffDate: actuals.cutoffDate,
+      cumulativePprPoints: actuals.cumulativePprPoints,
+      gamesPlayed: actuals.gamesPlayed,
+      ppg: actuals.ppg,
+      totalPtsPercentile: actuals.totalPtsPercentile,
+      ppgPercentile: actuals.ppgPercentile,
+      blendedValue,
+      blendDelta: blendedValue - baselineValue,
+    });
+  }
+
+  return blendedValue;
+}
+
+/**
+ * Compute valuation for a historical trade using season-aware ADP + blended actuals.
+ * When tradeActualsMap is provided, automatically blends actuals based on trade date.
+ * No toggle — every trade gets the right blend.
  */
 export function evaluateHistoricalTrade(
   trade: TradeRow,
   assets: TradeAssetRow[],
   seasonAdpMap: Map<string, Map<string, number>>,
   dynastyCtx?: DynastyContext,
+  tradeActualsMap?: Map<number, { meta: TradeActualsResult; players: Map<string, PlayerActualsResult> }>,
 ): TradeValuation {
   const tradeAssets = assets.filter((a) => a.trade_id === trade.id);
   const teamAAssets = tradeAssets.filter((a) => a.from_team_id === trade.team_a_id);
   const teamBAssets = tradeAssets.filter((a) => a.from_team_id === trade.team_b_id);
 
-  // Get the ADP map for THIS trade's season
   const seasonMap = seasonAdpMap.get(trade.season);
+  const tradeActuals = tradeActualsMap?.get(trade.id);
+  const audit: BlendedAuditEntry[] = [];
 
   function sumValue(items: TradeAssetRow[]): number {
     return items.reduce((sum, a) => {
@@ -315,11 +497,11 @@ export function evaluateHistoricalTrade(
         const adp = a.player_adp_at_trade
           ? Number(a.player_adp_at_trade)
           : seasonMap?.get(normalizeName(a.player_name ?? "")) ?? null;
-        let value = adp ? calcPlayerValue(adp) : 0;
-        // Apply dynasty multipliers if context provided
-        if (dynastyCtx && a.player_name && value > 0) {
-          value = applyDynastyMultiplier(
-            value,
+        let baseValue = adp ? calcPlayerValue(adp) : 0;
+        // Apply dynasty multipliers to the baseline
+        if (dynastyCtx && a.player_name && baseValue > 0) {
+          baseValue = applyDynastyMultiplier(
+            baseValue,
             a.player_name,
             a.player_position,
             adp,
@@ -327,11 +509,23 @@ export function evaluateHistoricalTrade(
             dynastyCtx,
           );
         }
+        // Blend with actuals if available
+        const nameNorm = normalizeName(a.player_name ?? "");
+        const playerActuals = tradeActuals?.players.get(nameNorm);
+        const value = computeBlendedPlayerValue(
+          baseValue,
+          playerActuals,
+          a.player_name ?? "",
+          a.player_position,
+          adp,
+          trade.season,
+          dynastyCtx,
+          audit,
+        );
         return sum + value;
       } else {
         const year = a.pick_year;
         const round = a.pick_round ?? 6;
-        // Skip picks with no year — they'll be unresolved (handled in Batch 2)
         if (year === null || year === undefined) return sum;
         return sum + calcPickValue(round, year, a.pick_number ?? undefined);
       }
@@ -348,8 +542,6 @@ export function evaluateHistoricalTrade(
   const verdict = getVerdict(pctDifference);
   let winningTeamId: number | null = null;
   let winningTeamName: string | null = null;
-  // Spec §5: pctDifference = (teamBSentValue - teamASentValue) / avg
-  // Positive pctDiff means Team B sent more → Team A received more → Team A wins
   if (Math.abs(pctDifference) > 5) {
     if (pctDifference > 0) {
       winningTeamId = trade.team_a_id;
@@ -360,26 +552,38 @@ export function evaluateHistoricalTrade(
     }
   }
 
-  return { teamAValue, teamBValue, pctDifference, verdict, winningTeamId, winningTeamName };
+  return {
+    teamAValue,
+    teamBValue,
+    pctDifference,
+    verdict,
+    winningTeamId,
+    winningTeamName,
+    seasonPhase: tradeActuals?.meta.seasonPhase,
+    actualsWeight: tradeActuals?.meta.actualsWeight,
+    lastCompletedWeek: tradeActuals?.meta.lastCompletedWeek,
+    blendedAudit: audit.length > 0 ? audit : undefined,
+  };
 }
 
 // ─── Three-Team Trade Valuation ──────────────────────────────
 
-/** Compute the value of a single asset using season ADP + optional dynasty modifiers */
+/** Compute the value of a single asset using season ADP + blended actuals */
 function computeAssetValue(
   a: TradeAssetRow,
   tradeSeason: string,
   seasonMap: Map<string, number> | undefined,
   dynastyCtx?: DynastyContext,
+  tradeActuals?: { meta: TradeActualsResult; players: Map<string, PlayerActualsResult> },
 ): number {
   if (a.asset_type === "player") {
     const adp = a.player_adp_at_trade
       ? Number(a.player_adp_at_trade)
       : seasonMap?.get(normalizeName(a.player_name ?? "")) ?? null;
-    let value = adp ? calcPlayerValue(adp) : 0;
-    if (dynastyCtx && a.player_name && value > 0) {
-      value = applyDynastyMultiplier(
-        value,
+    let baseValue = adp ? calcPlayerValue(adp) : 0;
+    if (dynastyCtx && a.player_name && baseValue > 0) {
+      baseValue = applyDynastyMultiplier(
+        baseValue,
         a.player_name,
         a.player_position,
         adp,
@@ -387,7 +591,19 @@ function computeAssetValue(
         dynastyCtx,
       );
     }
-    return value;
+    // Blend with actuals
+    const nameNorm = normalizeName(a.player_name ?? "");
+    const playerActuals = tradeActuals?.players.get(nameNorm);
+    return computeBlendedPlayerValue(
+      baseValue,
+      playerActuals,
+      a.player_name ?? "",
+      a.player_position,
+      adp,
+      tradeSeason,
+      dynastyCtx,
+      undefined, // no audit for three-team (could add later)
+    );
   }
   const year = a.pick_year;
   const round = a.pick_round ?? 6;
@@ -396,18 +612,18 @@ function computeAssetValue(
 }
 
 /**
- * Evaluate a three-team trade.
- * Uses recipient_team_id to attribute value: each asset is "sent" by from_team_id
- * and "received" by recipient_team_id. Net = received − sent.
+ * Evaluate a three-team trade with blended actuals.
  */
 export function evaluateThreeTeamTrade(
   trade: TradeRow,
   assets: TradeAssetRow[],
   seasonAdpMap: Map<string, Map<string, number>>,
   dynastyCtx?: DynastyContext,
+  tradeActualsMap?: Map<number, { meta: TradeActualsResult; players: Map<string, PlayerActualsResult> }>,
 ): ThreeTeamValuation {
   const tradeAssets = assets.filter((a) => a.trade_id === trade.id);
   const seasonMap = seasonAdpMap.get(trade.season);
+  const tradeActuals = tradeActualsMap?.get(trade.id);
 
   // Collect all participant team IDs and names
   const teamMap = new Map<number, string>();
@@ -417,7 +633,6 @@ export function evaluateThreeTeamTrade(
     teamMap.set(trade.team_c_id, trade.team_c_name);
   }
 
-  // Initialize sent/received accumulators per team
   const sent = new Map<number, number>();
   const received = new Map<number, number>();
   for (const teamId of teamMap.keys()) {
@@ -425,22 +640,17 @@ export function evaluateThreeTeamTrade(
     received.set(teamId, 0);
   }
 
-  // Attribute each asset's value
   for (const asset of tradeAssets) {
-    const val = computeAssetValue(asset, trade.season, seasonMap, dynastyCtx);
+    const val = computeAssetValue(asset, trade.season, seasonMap, dynastyCtx, tradeActuals);
     if (val <= 0) continue;
 
-    // Sent by from_team_id
     sent.set(asset.from_team_id, (sent.get(asset.from_team_id) ?? 0) + val);
-
-    // Received by recipient_team_id (should always be set for three-team trades)
     const recipient = asset.recipient_team_id;
     if (recipient) {
       received.set(recipient, (received.get(recipient) ?? 0) + val);
     }
   }
 
-  // Build team results
   const results: TeamValuationResult[] = [];
   for (const [teamId, teamName] of teamMap.entries()) {
     const s = sent.get(teamId) ?? 0;
@@ -451,15 +661,13 @@ export function evaluateThreeTeamTrade(
       sentValue: s,
       receivedValue: r,
       netValue: r - s,
-      rank: 0, // set below
+      rank: 0,
     });
   }
 
-  // Sort by net value descending — best deal first
   results.sort((a, b) => b.netValue - a.netValue);
   results.forEach((r, i) => { r.rank = i + 1; });
 
-  // Pad to exactly 3 if somehow fewer (shouldn't happen)
   while (results.length < 3) {
     results.push({ teamId: 0, teamName: "Unknown", sentValue: 0, receivedValue: 0, netValue: 0, rank: results.length + 1 });
   }
@@ -469,7 +677,6 @@ export function evaluateThreeTeamTrade(
   const winnerMarginOverSecond = winner.netValue - second.netValue;
   const conservationCheck = results.reduce((sum, r) => sum + r.netValue, 0);
 
-  // Verdict: use the margin between winner and worst-off team as pct of total value
   const totalValueMoved = Array.from(sent.values()).reduce((a, b) => a + b, 0);
   const spreadPct = totalValueMoved > 0
     ? Math.round(((winner.netValue - results[2].netValue) / totalValueMoved) * 100 * 10) / 10
@@ -483,5 +690,7 @@ export function evaluateThreeTeamTrade(
     conservationCheck,
     verdict,
     valuation_complete: true,
+    seasonPhase: tradeActuals?.meta.seasonPhase,
+    actualsWeight: tradeActuals?.meta.actualsWeight,
   };
 }

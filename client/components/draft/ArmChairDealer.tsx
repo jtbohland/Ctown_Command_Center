@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from "react";
-import type { DynastyContext } from "@/lib/trade-utils";
+import type { DynastyContext, TradeActualsResult } from "@/lib/trade-utils";
 import { useApiData } from "@/hooks/useApiData";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -26,11 +26,33 @@ export default function ArmChairDealer() {
   }, [data?.trades]);
 
   // Build dynasty context for historical trade evaluation
-  // MUST be before early returns — React hooks must run in the same order every render
   const dynastyCtx: DynastyContext | undefined = useMemo(() => {
     if (!data?.rookieClasses || data.rookieClasses.length === 0) return undefined;
     return { rookieClasses: data.rookieClasses, allAdp: data.historicalAdp ?? [] };
   }, [data?.rookieClasses, data?.historicalAdp]);
+
+  // Build trade inputs for ComputeTradeActuals
+  const tradeInputs = useMemo(() => {
+    if (!data?.trades) return [];
+    return data.trades.map((t: { id: number; season: string; trade_date: string | null }) => ({
+      tradeId: t.id,
+      season: t.season,
+      tradeDate: t.trade_date,
+    }));
+  }, [data?.trades]);
+
+  // Fetch actuals for all trades (auto-fetches when trade data loads)
+  const {
+    data: actualsData,
+    loading: actualsLoading,
+    fetching: actualsFetching,
+  } = useApiData(
+    "ComputeTradeActuals",
+    { trades: tradeInputs },
+    { enabled: tradeInputs.length > 0 },
+  );
+
+  const tradeActuals: TradeActualsResult[] = actualsData?.results ?? [];
 
   if (loading) {
     return (
@@ -63,7 +85,7 @@ export default function ArmChairDealer() {
     );
   }
 
-  const { trades, assets, draftCapital, players, teams, historicalAdp, rookieClasses } = data!;
+  const { trades, assets, draftCapital, players, teams, historicalAdp } = data!;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -74,11 +96,14 @@ export default function ArmChairDealer() {
           <div>
             <h2 className="text-lg font-extrabold tracking-tight">Arm Chair Dealer</h2>
             <span className="text-[10px] text-muted-foreground">
-              Dynasty trade evaluation powered by ADP • {trades.length} historical trades across {seasons.length} seasons
+              Dynasty trade evaluation powered by ADP + Actuals • {trades.length} historical trades across {seasons.length} seasons
             </span>
           </div>
-          {fetching && (
+          {(fetching || actualsFetching) && (
             <span className="text-xs text-muted-foreground ml-auto animate-pulse">🔄 Updating…</span>
+          )}
+          {actualsLoading && (
+            <span className="text-xs text-amber-400 ml-auto animate-pulse">⚡ Computing actuals…</span>
           )}
         </div>
       </div>
@@ -101,11 +126,11 @@ export default function ArmChairDealer() {
         </TabsContent>
 
         <TabsContent value="history" className="flex-1 overflow-auto px-5 py-4">
-          <TradeHistory trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} dynastyCtx={dynastyCtx} />
+          <TradeHistory trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} dynastyCtx={dynastyCtx} tradeActuals={tradeActuals} />
         </TabsContent>
 
         <TabsContent value="gbu" className="flex-1 overflow-auto px-5 py-4">
-          <GoodBadUgly trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} dynastyCtx={dynastyCtx} />
+          <GoodBadUgly trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} dynastyCtx={dynastyCtx} tradeActuals={tradeActuals} />
         </TabsContent>
 
         <TabsContent value="siren" className="flex-1 overflow-auto px-5 py-4">

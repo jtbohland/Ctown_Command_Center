@@ -10,6 +10,7 @@ import {
   getSeasonAdp,
   calcPlayerValue,
   calcPickValue,
+  buildTradeActualsMap,
   SEVERITY_COLORS,
   type TradeRow,
   type TradeAssetRow,
@@ -19,6 +20,7 @@ import {
   type TradeValuation,
   type ThreeTeamValuation,
   type DynastyContext,
+  type TradeActualsResult,
 } from "@/lib/trade-utils";
 import ThreeTeamTradeDetail from "./ThreeTeamTradeDetail";
 
@@ -29,6 +31,7 @@ interface Props {
   historicalAdp: HistoricalAdpRow[];
   seasons: string[];
   dynastyCtx?: DynastyContext;
+  tradeActuals: TradeActualsResult[];
 }
 
 interface EvaluatedTrade {
@@ -46,6 +49,15 @@ const VERDICT_META: Record<VerdictSeverity, { title: string; emoji: string; desc
   clear: { title: "Pick Six", emoji: "🏆", description: "One side came out significantly ahead (15–25%)" },
   slight: { title: "Edge Rush", emoji: "📈", description: "Close, but one side got a little more (5–15%)" },
   fair: { title: "Fair Catch", emoji: "🧤", description: "Both sides walked away happy (within 5%)" },
+};
+
+// ─── Phase Display ─────────────────────────────────────────────
+const PHASE_LABELS: Record<string, { label: string; emoji: string; color: string }> = {
+  preseason: { label: "Pre", emoji: "📋", color: "text-slate-400" },
+  early: { label: "Early", emoji: "🌱", color: "text-blue-400" },
+  mid: { label: "Mid", emoji: "⚡", color: "text-amber-400" },
+  late: { label: "Late", emoji: "🔥", color: "text-orange-400" },
+  postseason: { label: "Post", emoji: "🏆", color: "text-emerald-400" },
 };
 
 // ─── Small sub-components ─────────────────────────────────────
@@ -127,6 +139,12 @@ function TradeOfSeasonCard({ label, emoji, et, assets, expandedId, onToggle, sea
           <span className="text-base">{emoji}</span>
           <span className={`text-[10px] font-extrabold tracking-widest uppercase ${colors.text}`}>{label}</span>
           <span className="text-[10px] text-muted-foreground ml-auto font-mono">#{trade.trade_number} · {trade.season}</span>
+          {/* Phase badge */}
+          {valuation.seasonPhase && valuation.actualsWeight != null && valuation.actualsWeight > 0 && (
+            <span className={`text-[8px] font-mono ${PHASE_LABELS[valuation.seasonPhase]?.color ?? "text-muted-foreground"}`}>
+              {PHASE_LABELS[valuation.seasonPhase]?.emoji} {Math.round(valuation.actualsWeight * 100)}%
+            </span>
+          )}
         </div>
         {/* Teams row */}
         <div className="flex items-center gap-1.5 text-xs">
@@ -184,7 +202,7 @@ function TradeOfSeasonCard({ label, emoji, et, assets, expandedId, onToggle, sea
 
 // ─── Main Component ───────────────────────────────────────────
 
-export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seasons, dynastyCtx }: Props) {
+export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seasons, dynastyCtx, tradeActuals }: Props) {
   const [expandedTrade, setExpandedTrade] = useState<number | null>(null);
   const [selectedSeason, setSelectedSeason] = useState<string>("all");
   const [activeFilters, setActiveFilters] = useState<Set<VerdictSeverity>>(new Set(VERDICT_ORDER));
@@ -192,8 +210,10 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
 
   // Season-aware ADP: season → (player_name → adp_rank)
   const seasonAdpMap = useMemo(() => buildSeasonAdpMap(historicalAdp), [historicalAdp]);
+  // Trade actuals map: tradeId → { meta, players }
+  const actualsMap = useMemo(() => buildTradeActualsMap(tradeActuals), [tradeActuals]);
 
-  // Filter trades by season, then evaluate each
+  // Filter trades by season
   const filteredTrades = useMemo(
     () => (selectedSeason === "all" ? trades : trades.filter((t) => t.season === selectedSeason)),
     [trades, selectedSeason]
@@ -212,13 +232,13 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
       const is3 = isThreeTeamTrade(trade);
       return {
         trade,
-        valuation: evaluateHistoricalTrade(trade, assets, seasonAdpMap, dynastyCtx),
+        valuation: evaluateHistoricalTrade(trade, assets, seasonAdpMap, dynastyCtx, actualsMap),
         threeTeamValuation: is3
-          ? evaluateThreeTeamTrade(trade, assets, seasonAdpMap, dynastyCtx)
+          ? evaluateThreeTeamTrade(trade, assets, seasonAdpMap, dynastyCtx, actualsMap)
           : undefined,
       };
     });
-  }, [typeFilteredTrades, assets, seasonAdpMap, dynastyCtx]);
+  }, [typeFilteredTrades, assets, seasonAdpMap, dynastyCtx, actualsMap]);
 
   // Group by severity
   const grouped = useMemo(() => {
@@ -242,9 +262,14 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
     pct: total > 0 ? Math.round((grouped[s].length / total) * 100) : 0,
   }));
 
-  // Trade of the Season — biggest robbery, biggest non-robbery winner, most even
+  // Count blended trades
+  const blendedCount = useMemo(
+    () => evaluated.filter(et => et.valuation.actualsWeight && et.valuation.actualsWeight > 0).length,
+    [evaluated]
+  );
+
+  // Trade of the Season — biggest robbery, most even
   const featuredTrades = useMemo<FeaturedTrade[]>(() => {
-    // Only consider trades that include at least one player (no pick-for-pick only)
     const tradesWithPlayers = evaluated.filter((et) => {
       const tradeAssets = assets.filter((a) => a.trade_id === et.trade.id);
       return tradeAssets.some((a) => a.asset_type === "player");
@@ -260,7 +285,6 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
     if (mostLopsided) {
       results.push({ label: "Biggest Robbery", emoji: "🚨", et: mostLopsided });
     }
-    // Most even (different from mostLopsided)
     if (mostEven && mostEven.trade.id !== mostLopsided?.trade.id) {
       results.push({ label: "Most Even Deal", emoji: "⚖️", et: mostEven });
     } else if (evaluated.length > 1) {
@@ -270,22 +294,21 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
       if (nextEven) results.push({ label: "Most Even Deal", emoji: "⚖️", et: nextEven });
     }
     return results;
-  }, [evaluated]);
+  }, [evaluated, assets]);
 
-  // Three-team count for display
+  // Three-team count
   const threeTeamCount = useMemo(
     () => (selectedSeason === "all" ? trades : trades.filter((t) => t.season === selectedSeason)).filter(isThreeTeamTrade).length,
     [trades, selectedSeason]
   );
 
-  // Manager leaderboard — includes team C for three-team trades
+  // Manager leaderboard
   const leaderboard = useMemo(() => {
     const board = new Map<string, { wins: number; losses: number; even: number }>();
     for (const et of evaluated) {
       const { trade, threeTeamValuation } = et;
 
       if (threeTeamValuation) {
-        // Three-team: rank 1 = win, rank 2 = even, rank 3 = loss
         for (const team of threeTeamValuation.teams) {
           if (!board.has(team.teamName)) board.set(team.teamName, { wins: 0, losses: 0, even: 0 });
           if (team.rank === 1) board.get(team.teamName)!.wins++;
@@ -293,7 +316,6 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
           else board.get(team.teamName)!.losses++;
         }
       } else {
-        // Two-team
         const { valuation } = et;
         const teamNames = [trade.team_a_name, trade.team_b_name];
         for (const name of teamNames) {
@@ -319,7 +341,7 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
     setActiveFilters((prev) => {
       const next = new Set(prev);
       if (next.has(s)) {
-        if (next.size === 1) return prev; // keep at least one
+        if (next.size === 1) return prev;
         next.delete(s);
       } else {
         next.add(s);
@@ -387,7 +409,18 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
             );
           })}
         </div>
-        <span className="text-[10px] text-muted-foreground ml-auto font-mono">{total} trades</span>
+
+        {/* Blended indicator (replaces ADP/Actuals toggle) */}
+        {blendedCount > 0 && (
+          <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-2.5 py-1">
+            <span className="text-[10px] text-emerald-400 font-semibold">⚡ Blended</span>
+            <span className="text-[9px] text-emerald-400/70 font-mono">{blendedCount}/{total}</span>
+          </div>
+        )}
+
+        <span className="text-[10px] text-muted-foreground ml-auto font-mono">
+          {total} trades
+        </span>
       </div>
 
       {/* ── Stats Banner ── */}
@@ -449,7 +482,6 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
             <div className="flex-1 border-t border-border/40" />
           </div>
           <div className="rounded-xl border border-border/50 overflow-hidden">
-            {/* Header */}
             <div className="grid grid-cols-[24px_1fr_48px_48px_48px_48px] gap-1 px-3 py-1.5 bg-muted/40 border-b border-border/30 text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
               <span>#</span>
               <span>Manager</span>
@@ -495,7 +527,6 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
 
         return (
           <div key={severity} className="space-y-2">
-            {/* Section header */}
             <div className={`flex items-center gap-2 py-2 px-3 rounded-lg ${colors.bg} border ${colors.border}`}>
               <span className="text-lg">{meta.emoji}</span>
               <div>
@@ -505,7 +536,6 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
               <Badge className={`ml-auto ${colors.badge} border`}>{items.length}</Badge>
             </div>
 
-            {/* Trade rows */}
             <div className="space-y-1.5 pl-2">
               {items.map(({ trade, valuation, threeTeamValuation: threeTeamVal }) => {
                 const isExpanded = expandedTrade === trade.id;
@@ -513,9 +543,7 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
                 const teamBAssets = assets.filter((a) => a.trade_id === trade.id && a.from_team_id === trade.team_b_id);
 
                 const is3Way = isThreeTeamTrade(trade);
-                const displayWinner = is3Way && threeTeamVal
-                  ? threeTeamVal.winner
-                  : null;
+                const displayWinner = is3Way && threeTeamVal ? threeTeamVal.winner : null;
 
                 return (
                   <div
@@ -525,7 +553,6 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
                     }`}
                     onClick={() => setExpandedTrade(isExpanded ? null : trade.id)}
                   >
-                    {/* Compact row */}
                     <div className="flex items-center gap-2 px-3 py-2 text-xs">
                       <span className="font-mono text-muted-foreground w-6 text-[10px]">#{trade.trade_number}</span>
                       {is3Way && (
@@ -548,6 +575,12 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
                             <span className="truncate font-medium">{trade.team_c_name}</span>
                           </span>
                         </>
+                      )}
+                      {/* Phase indicator */}
+                      {valuation.seasonPhase && valuation.actualsWeight != null && valuation.actualsWeight > 0 && (
+                        <span className={`text-[8px] font-mono shrink-0 ${PHASE_LABELS[valuation.seasonPhase]?.color ?? "text-muted-foreground"}`}>
+                          {PHASE_LABELS[valuation.seasonPhase]?.emoji} {Math.round(valuation.actualsWeight * 100)}%
+                        </span>
                       )}
                       {is3Way && displayWinner ? (
                         <span className={`text-[10px] font-bold ml-auto ${colors.text}`}>
@@ -574,7 +607,6 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
                             dynastyCtx={dynastyCtx}
                           />
                         ) : (
-                          /* Two-team expanded detail */
                           <>
                             <div className="grid grid-cols-2 gap-4 text-xs">
                               <div>
