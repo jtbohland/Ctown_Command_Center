@@ -14,7 +14,7 @@ export default api({
     csvFile: z.object({
       files: z.array(readableFileSchema).min(1),
     }),
-    mode: z.enum(["players", "keepers", "dynasty", "rookie"]).default("players"),
+    mode: z.enum(["players", "keepers", "dynasty", "rookie", "roster"]).default("players"),
   }),
 
   output: z.object({
@@ -105,6 +105,72 @@ export default api({
       }
 
       return { imported: assigned, updated: 0, message: `Assigned ${assigned} keepers from CSV.` };
+    }
+
+    // ── ROSTER MODE: CSV with team, player columns → assigns roster_team_id ──
+    if (mode === "roster") {
+      const rTeamCol = header.findIndex((h: string) => h.includes("team") || h.includes("manager"));
+      const rPlayerCol = header.findIndex((h: string) => h.includes("player") || h.includes("name"));
+      if (rTeamCol === -1 || rPlayerCol === -1) {
+        throw new Error("Roster CSV must have 'team' and 'player' columns. Found: " + header.join(", "));
+      }
+
+      // Ensure roster_team_id column exists
+      await ctx.integrations.apps_db.execute(
+        `ALTER TABLE ffwr_players ADD COLUMN IF NOT EXISTS roster_team_id INTEGER REFERENCES ffwr_teams(id)`,
+        undefined,
+        { label: "Ensure roster_team_id column" }
+      );
+
+      // Clear all existing roster assignments
+      await ctx.integrations.apps_db.execute(
+        `UPDATE ffwr_players SET roster_team_id = NULL`,
+        undefined,
+        { label: "Clear existing roster assignments" }
+      );
+
+      // Re-assign keepers
+      await ctx.integrations.apps_db.execute(
+        `UPDATE ffwr_players SET roster_team_id = keeper_team_id WHERE is_keeper = true AND keeper_team_id IS NOT NULL`,
+        undefined,
+        { label: "Restore keeper roster assignments" }
+      );
+
+      let assigned = 0;
+      for (let i = 1; i < lines.length; i++) {
+        const cols: string[] = parseCsvLine(lines[i]);
+        const teamName = (cols[rTeamCol] || "").trim();
+        const playerName = (cols[rPlayerCol] || "").trim();
+        if (!teamName || !playerName) continue;
+
+        // Find team by name or manager name (fuzzy)
+        const teamResult = await ctx.integrations.apps_db.query(
+          `SELECT id FROM ffwr_teams WHERE LOWER(team_name) LIKE LOWER($1) OR LOWER(manager_name) LIKE LOWER($1) LIMIT 1`,
+          z.object({ id: z.number() }),
+          [`%${teamName}%`],
+          { label: `Find team: ${teamName}` }
+        );
+        if (teamResult.length === 0) continue;
+
+        // Find player by name (fuzzy)
+        const playerResult = await ctx.integrations.apps_db.query(
+          `SELECT id FROM ffwr_players WHERE LOWER(name) LIKE LOWER($1) LIMIT 1`,
+          z.object({ id: z.number() }),
+          [`%${playerName}%`],
+          { label: `Find player: ${playerName}` }
+        );
+
+        if (playerResult.length > 0) {
+          await ctx.integrations.apps_db.execute(
+            `UPDATE ffwr_players SET roster_team_id = $1 WHERE id = $2`,
+            [teamResult[0].id, playerResult[0].id],
+            { label: `Roster assign: ${playerName} → ${teamName}` }
+          );
+          assigned++;
+        }
+      }
+
+      return { imported: assigned, updated: 0, message: `Assigned ${assigned} players to team rosters from CSV.` };
     }
 
     // ── DYNASTY MODE: CSV with RK, TIERS, PLAYER NAME, TEAM, POS, AGE ──
