@@ -76,6 +76,24 @@ const RookieClassSchema = z.object({
   age_on_draft_day: z.coerce.number(),
 });
 
+const PlayerScoreSchema = z.object({
+  canonical_player_id: z.coerce.number(),
+  season: z.string(),
+  overall_rank: z.coerce.number(),
+  positional_rank: z.coerce.number(),
+  games_played: z.coerce.number(),
+  avg_points: z.coerce.number(),
+  total_points: z.coerce.number(),
+  position: z.string(),
+  ppg_percentile: z.coerce.number(),
+  availability_score: z.coerce.number(),
+  season_actual_score: z.coerce.number(),
+  adp_rank_that_season: z.coerce.number().nullable(),
+  expectation_delta: z.coerce.number().nullable(),
+  canonical_name: z.string(),
+  normalized_name: z.string(),
+});
+
 export default api({
   name: "GetTradeData",
   description: "Fetches all trade data, draft capital, players, teams, ADP, and rookie classes.",
@@ -94,6 +112,7 @@ export default api({
     teams: z.array(TeamSchema),
     historicalAdp: z.array(HistoricalAdpSchema),
     rookieClasses: z.array(RookieClassSchema),
+    playerScores: z.array(PlayerScoreSchema),
   }),
 
   async run(ctx) {
@@ -179,6 +198,27 @@ export default api({
       ctx.log.warn("ffwr_rookie_classes table not found — run SeedRookieClasses first");
     }
 
-    return { trades, assets, draftCapital, players, teams, historicalAdp, rookieClasses };
+    // Fetch player scores for actuals-based retrospective valuation
+    let playerScores: z.infer<typeof PlayerScoreSchema>[] = [];
+    try {
+      playerScores = await ctx.integrations.apps_db.query(
+        `SELECT ps.canonical_player_id, ps.season, ps.overall_rank, ps.positional_rank,
+           ps.games_played, ps.avg_points, ps.total_points, ps.position,
+           ps.ppg_percentile, ps.availability_score, ps.season_actual_score,
+           ps.adp_rank_that_season, ps.expectation_delta,
+           cp.canonical_name, cp.normalized_name
+         FROM ffwr_player_scores ps
+         JOIN ffwr_canonical_players cp ON cp.id = ps.canonical_player_id
+         ORDER BY ps.season, ps.overall_rank
+         LIMIT 5000`,
+        PlayerScoreSchema,
+        undefined,
+        { label: "Fetch player scores for retrospective valuation" }
+      );
+    } catch {
+      ctx.log.warn("ffwr_player_scores table not found — retrospective valuation unavailable");
+    }
+
+    return { trades, assets, draftCapital, players, teams, historicalAdp, rookieClasses, playerScores };
   },
 });

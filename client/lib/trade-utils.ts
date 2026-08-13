@@ -198,7 +198,42 @@ export interface TradeValuation {
   verdict: Verdict;
   winningTeamId: number | null;
   winningTeamName: string | null;
+  // Retrospective mode extras
+  valuationMode?: "as-of-trade" | "retrospective";
+  actualsAdjustments?: ActualsAdjustment[];
 }
+
+// ─── Player Scores / Actuals Types ───────────────────────────
+export interface PlayerScoreRow {
+  canonical_player_id: number;
+  season: string;
+  overall_rank: number;
+  positional_rank: number;
+  games_played: number;
+  avg_points: number;
+  total_points: number;
+  position: string;
+  ppg_percentile: number;
+  availability_score: number;
+  season_actual_score: number;
+  adp_rank_that_season: number | null;
+  expectation_delta: number | null;
+  canonical_name: string;
+  normalized_name: string;
+}
+
+export interface ActualsAdjustment {
+  playerName: string;
+  adpValue: number;
+  actualsValue: number;
+  delta: number;          // actualsValue - adpValue
+  adpRank: number | null;
+  actualsRank: number;
+  expectationDelta: number | null;
+  ppgPercentile: number;
+}
+
+export type ValuationMode = "as-of-trade" | "retrospective";
 
 // ─── Three-Team Trade Types ──────────────────────────────────
 
@@ -483,5 +518,125 @@ export function evaluateThreeTeamTrade(
     conservationCheck,
     verdict,
     valuation_complete: true,
+  };
+}
+
+// ─── Actuals-Based Retrospective Valuation ───────────────────
+
+/** Build a season-keyed actuals rank map: season → (normalized player name → overall_rank) */
+export function buildActualsRankMap(
+  playerScores: PlayerScoreRow[],
+): Map<string, Map<string, { rank: number; ppgPercentile: number; expectationDelta: number | null }>> {
+  const map = new Map<string, Map<string, { rank: number; ppgPercentile: number; expectationDelta: number | null }>>();
+  for (const row of playerScores) {
+    if (!map.has(row.season)) map.set(row.season, new Map());
+    map.get(row.season)!.set(row.normalized_name, {
+      rank: row.overall_rank,
+      ppgPercentile: row.ppg_percentile,
+      expectationDelta: row.expectation_delta,
+    });
+  }
+  return map;
+}
+
+/**
+ * Retrospective valuation for a historical trade.
+ * Uses actual season performance (overall_rank) instead of ADP to compute player values.
+ * Same power-law formula: 10,000 × (1/rank)^0.6 — only the rank source changes.
+ */
+export function evaluateHistoricalTradeRetrospective(
+  trade: TradeRow,
+  assets: TradeAssetRow[],
+  seasonAdpMap: Map<string, Map<string, number>>,
+  actualsRankMap: Map<string, Map<string, { rank: number; ppgPercentile: number; expectationDelta: number | null }>>,
+  dynastyCtx?: DynastyContext,
+): TradeValuation {
+  const tradeAssets = assets.filter((a) => a.trade_id === trade.id);
+  const teamAAssets = tradeAssets.filter((a) => a.from_team_id === trade.team_a_id);
+  const teamBAssets = tradeAssets.filter((a) => a.from_team_id === trade.team_b_id);
+
+  const seasonActuals = actualsRankMap.get(trade.season);
+  const seasonMap = seasonAdpMap.get(trade.season);
+  const adjustments: ActualsAdjustment[] = [];
+
+  function sumValue(items: TradeAssetRow[]): number {
+    return items.reduce((sum, a) => {
+      if (a.asset_type === "player") {
+        const name = a.player_name ?? "";
+        const nameNorm = normalizeName(name);
+
+        // Try actuals rank first (retrospective), fall back to ADP
+        const actualsData = seasonActuals?.get(nameNorm);
+        const adp = a.player_adp_at_trade
+          ? Number(a.player_adp_at_trade)
+          : seasonMap?.get(nameNorm) ?? null;
+
+        let value: number;
+        if (actualsData) {
+          // Use actual overall rank as the "rank" in the formula
+          value = calcPlayerValue(actualsData.rank);
+          const adpValue = adp ? calcPlayerValue(adp) : 0;
+
+          // Apply dynasty multipliers on the actuals-based value
+          if (dynastyCtx && value > 0) {
+            value = applyDynastyMultiplier(value, name, a.player_position, adp, trade.season, dynastyCtx);
+          }
+
+          adjustments.push({
+            playerName: name,
+            adpValue,
+            actualsValue: value,
+            delta: value - adpValue,
+            adpRank: adp,
+            actualsRank: actualsData.rank,
+            expectationDelta: actualsData.expectationDelta,
+            ppgPercentile: actualsData.ppgPercentile,
+          });
+        } else {
+          // No actuals data — fall back to ADP
+          value = adp ? calcPlayerValue(adp) : 0;
+          if (dynastyCtx && a.player_name && value > 0) {
+            value = applyDynastyMultiplier(value, name, a.player_position, adp, trade.season, dynastyCtx);
+          }
+        }
+        return sum + value;
+      } else {
+        const year = a.pick_year;
+        const round = a.pick_round ?? 6;
+        if (year === null || year === undefined) return sum;
+        return sum + calcPickValue(round, year, a.pick_number ?? undefined);
+      }
+    }, 0);
+  }
+
+  const teamAValue = sumValue(teamAAssets);
+  const teamBValue = sumValue(teamBAssets);
+  const avgValue = (teamAValue + teamBValue) / 2;
+  const pctDifference = avgValue > 0
+    ? Math.round(((teamBValue - teamAValue) / avgValue) * 100 * 10) / 10
+    : 0;
+
+  const verdict = getVerdict(pctDifference);
+  let winningTeamId: number | null = null;
+  let winningTeamName: string | null = null;
+  if (Math.abs(pctDifference) > 5) {
+    if (pctDifference > 0) {
+      winningTeamId = trade.team_a_id;
+      winningTeamName = trade.team_a_name;
+    } else {
+      winningTeamId = trade.team_b_id;
+      winningTeamName = trade.team_b_name;
+    }
+  }
+
+  return {
+    teamAValue,
+    teamBValue,
+    pctDifference,
+    verdict,
+    winningTeamId,
+    winningTeamName,
+    valuationMode: "retrospective",
+    actualsAdjustments: adjustments,
   };
 }
