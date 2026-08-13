@@ -11,6 +11,7 @@ import GoodBadUgly from "./GoodBadUgly";
 import SirenSale from "./SirenSale";
 import Playbook from "./Playbook";
 
+
 export default function ArmChairDealer() {
   const { data, loading, fetching, isError, error, refetch } = useApiData("GetTradeData", {});
 
@@ -92,9 +93,9 @@ export default function ArmChairDealer() {
       {/* Header */}
       <div className="px-5 py-3 border-b border-border bg-gradient-to-r from-blue-950/30 via-card/60 to-red-950/30">
         <div className="flex items-center gap-3">
-          <span className="text-2xl">🛋️</span>
+          <span className="text-2xl">🫱🏻‍🫲🏽</span>
           <div>
-            <h2 className="text-lg font-extrabold tracking-tight">Arm Chair Dealer</h2>
+            <h2 className="text-lg font-extrabold tracking-tight">The C-Town Exchange</h2>
             <span className="text-[10px] text-muted-foreground">
               Dynasty trade evaluation powered by ADP + Actuals • {trades.length} historical trades across {seasons.length} seasons
             </span>
@@ -118,6 +119,7 @@ export default function ArmChairDealer() {
             <TabsTrigger value="gbu" className="text-xs gap-1">🏛️ The Verdicts</TabsTrigger>
             <TabsTrigger value="siren" className="text-xs gap-1">🚨 Sound The Alarm</TabsTrigger>
             <TabsTrigger value="capital" className="text-xs gap-1">💰 The Treasury</TabsTrigger>
+
           </TabsList>
         </div>
 
@@ -144,6 +146,7 @@ export default function ArmChairDealer() {
         <TabsContent value="playbook" className="flex-1 overflow-auto px-5 py-4">
           <Playbook />
         </TabsContent>
+
       </Tabs>
     </div>
   );

@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo } from "react";
+import SirenCelebration from "./SirenCelebration";
 import { useApi } from "@/hooks/useApi";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -183,6 +184,7 @@ export default function SirenSale({ teams, players, draftCapital, onSaved, seaso
       setTeamBAssets([]);
       setTeamCAssets([]);
       onSaved();
+      setSirenActive(true);
     } catch (err) {
       const message = err && typeof err === "object" && "message" in err
         ? String((err as { message: unknown }).message)
@@ -190,6 +192,8 @@ export default function SirenSale({ teams, players, draftCapital, onSaved, seaso
       toast.error("Save failed: " + message);
     }
   }, [teamAId, teamBId, teamCId, wildCardEnabled, season, period, teamAAssets, teamBAssets, teamCAssets, saveTrade, teams, onSaved]);
+
+  const [sirenActive, setSirenActive] = useState(false);
 
   const teamA = teams.find((t) => t.id === teamAId);
   const teamB = teams.find((t) => t.id === teamBId);
@@ -220,6 +224,7 @@ export default function SirenSale({ teams, players, draftCapital, onSaved, seaso
 
   return (
     <div className="space-y-4">
+      <SirenCelebration active={sirenActive} onComplete={() => setSirenActive(false)} />
       {/* Header */}
       <div className="rounded-xl border border-red-500/30 bg-gradient-to-r from-red-600/10 via-orange-600/5 to-red-600/10 p-4">
         <div className="flex items-center justify-between">

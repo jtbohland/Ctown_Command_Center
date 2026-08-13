@@ -2,11 +2,13 @@ import { useState, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
+import { DEFAULT_MODIFIERS } from "@/lib/trade-modifiers";
 import {
   evaluateHistoricalTrade,
   evaluateThreeTeamTrade,
   isThreeTeamTrade,
   buildSeasonAdpMap,
+  buildSeasonAdpDetailMap,
   getSeasonAdp,
   calcPlayerValue,
   calcPickValue,
@@ -63,15 +65,17 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
 
   // Season-aware ADP: season → (player_name → adp_rank)
   const seasonAdpMap = useMemo(() => buildSeasonAdpMap(historicalAdp), [historicalAdp]);
+  // Season ADP detail: season → (player_name → { adpRank, position }) for fallback
+  const seasonAdpDetailMap = useMemo(() => buildSeasonAdpDetailMap(historicalAdp), [historicalAdp]);
   // Trade actuals map: tradeId → { meta, players }
   const actualsMap = useMemo(() => buildTradeActualsMap(tradeActuals), [tradeActuals]);
 
   const tradesWithVerdicts = useMemo(() => {
     return trades.map((trade) => ({
       trade,
-      valuation: evaluateHistoricalTrade(trade, assets, seasonAdpMap, dynastyCtx, actualsMap),
+      valuation: evaluateHistoricalTrade(trade, assets, seasonAdpMap, dynastyCtx, actualsMap, seasonAdpDetailMap, DEFAULT_MODIFIERS.unrankedFallbackFactor),
     }));
-  }, [trades, assets, seasonAdpMap, dynastyCtx, actualsMap]);
+  }, [trades, assets, seasonAdpMap, dynastyCtx, actualsMap, seasonAdpDetailMap]);
 
   const filteredTrades = useMemo(() => {
     if (seasonFilter === "all") return tradesWithVerdicts;
@@ -253,7 +257,7 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
   );
 }
 
-// ─── Expanded Trade Detail ──────────────────────────────────
+// ─── Expanded Trade Detail (2-way: sends/receives/net like 3-way) ───
 function ExpandedTradeDetail({
   trade,
   assets,
@@ -276,6 +280,14 @@ function ExpandedTradeDetail({
   const tradeActuals = actualsMap.get(trade.id);
   const blendedAudit = valuation.blendedAudit as BlendedAuditEntry[] | undefined;
 
+  // Compute sent/received/net for each team (mirroring 3-way pattern)
+  const teamASent = valuation.teamAValue;
+  const teamAReceived = valuation.teamBValue;
+  const teamANet = teamAReceived - teamASent;
+  const teamBSent = valuation.teamBValue;
+  const teamBReceived = valuation.teamAValue;
+  const teamBNet = teamBReceived - teamBSent;
+
   return (
     <div className={`ml-4 mr-4 mb-2 mt-1 border-t ${colors.border} ${colors.bg} rounded-b-lg px-4 py-3`}>
       {/* Phase indicator bar */}
@@ -294,33 +306,49 @@ function ExpandedTradeDetail({
       )}
 
       <div className="grid grid-cols-2 gap-6">
-        <AssetColumn
+        <TwoWayTeamColumn
           teamName={trade.team_a_name}
-          assets={teamAAssets}
-          totalValue={valuation.teamAValue}
+          sentAssets={teamAAssets}
+          receivedAssets={teamBAssets}
+          sentValue={teamASent}
+          receivedValue={teamAReceived}
+          netValue={teamANet}
           isWinner={valuation.winningTeamId === trade.team_a_id}
           tradeSeason={trade.season}
           seasonAdpMap={seasonAdpMap}
+          colorClass={colors.text}
           blendedAudit={blendedAudit}
+          side="left"
         />
-        <AssetColumn
+        <TwoWayTeamColumn
           teamName={trade.team_b_name}
-          assets={teamBAssets}
-          totalValue={valuation.teamBValue}
+          sentAssets={teamBAssets}
+          receivedAssets={teamAAssets}
+          sentValue={teamBSent}
+          receivedValue={teamBReceived}
+          netValue={teamBNet}
           isWinner={valuation.winningTeamId === trade.team_b_id}
           tradeSeason={trade.season}
           seasonAdpMap={seasonAdpMap}
+          colorClass={colors.text}
           blendedAudit={blendedAudit}
+          side="right"
         />
       </div>
-      {/* Winner summary */}
+
+      {/* Winner banner */}
       <div className="mt-3 pt-2 border-t border-border/30 text-center">
         {valuation.winningTeamName ? (
           <span className="text-[11px] font-bold">
-            {getTeamEmoji(valuation.winningTeamName)} <span className="text-emerald-400">{valuation.winningTeamName}</span>
-            <span className="text-muted-foreground"> receives </span>
-            <span className="font-mono text-emerald-400">+{Math.abs(Math.round(valuation.teamAValue - valuation.teamBValue)).toLocaleString()}</span>
-            <span className="text-muted-foreground"> more value ({Math.abs(valuation.pctDifference)}% gap)</span>
+            {getTeamEmoji(valuation.winningTeamName)}{" "}
+            <span className="text-emerald-400">{valuation.winningTeamName}</span>
+            <span className="text-muted-foreground"> gets the better deal </span>
+            <span className="font-mono text-emerald-400">
+              (+{Math.abs(Math.round(valuation.teamAValue - valuation.teamBValue)).toLocaleString()} net)
+            </span>
+            <span className="text-muted-foreground ml-1.5">
+              · {Math.abs(valuation.pctDifference)}% gap
+            </span>
           </span>
         ) : (
           <span className="text-[11px] font-bold text-emerald-400">⚖️ Even trade — within 5% value gap</span>
@@ -339,7 +367,7 @@ function formatPickLabel(a: TradeAssetRow): string {
   return parts.join(" ");
 }
 
-function getAssetValue(a: TradeAssetRow, tradeSeason: string, seasonAdpMap: Map<string, Map<string, number>>): number {
+function getAssetDisplayValue(a: TradeAssetRow, tradeSeason: string, seasonAdpMap: Map<string, Map<string, number>>): number {
   if (a.asset_type === "player") {
     const adp = a.player_adp_at_trade
       ? Number(a.player_adp_at_trade)
@@ -351,24 +379,116 @@ function getAssetValue(a: TradeAssetRow, tradeSeason: string, seasonAdpMap: Map<
   return calcPickValue(round, year, a.pick_number ?? undefined);
 }
 
-function AssetColumn({
+// ─── Asset Row (shared by sends/receives sections) ──────────
+function TradeAssetItem({
+  a,
+  tradeSeason,
+  seasonAdpMap,
+  audit,
+}: {
+  a: TradeAssetRow;
+  tradeSeason: string;
+  seasonAdpMap: Map<string, Map<string, number>>;
+  audit?: BlendedAuditEntry;
+}) {
+  const baseVal = getAssetDisplayValue(a, tradeSeason, seasonAdpMap);
+  const displayValue = audit ? audit.blendedValue : baseVal;
+
+  return (
+    <div className="space-y-0.5">
+      <div className="flex items-center gap-1.5 py-0.5 text-xs">
+        {a.asset_type === "player" ? (
+          <Badge className={`text-[9px] px-1 py-0 ${POSITION_BG_CLASSES[a.player_position ?? ""] ?? "bg-muted"}`}>
+            {a.player_position}
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/10 border-amber-500/30 text-amber-400">📋</Badge>
+        )}
+        <span className="truncate flex-1">
+          {a.asset_type === "player" ? a.player_name : formatPickLabel(a)}
+        </span>
+        <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+          ({Math.round(displayValue).toLocaleString()})
+        </span>
+        {/* Evidence status badges */}
+        {audit?.evidence?.fallbackUsed && (
+          <Badge variant="outline" className="text-[8px] px-1 py-0 shrink-0 border-yellow-500/30 bg-yellow-500/10 text-yellow-400">
+            {audit.evidence.fallbackType === "rookie_baseline" ? "🌟 Rookie"
+              : audit.evidence.fallbackType === "actuals_derived" ? "📊 Actuals"
+              : audit.evidence.adpStatus === "outside_export_range" ? "📏 Range"
+              : "🪤 Fallback"}
+          </Badge>
+        )}
+        {audit?.evidence && !audit.evidence.fallbackUsed && audit.evidence.valuationConfidence === "medium" && (
+          <Badge variant="outline" className="text-[8px] px-1 py-0 shrink-0 border-blue-500/30 bg-blue-500/10 text-blue-400">
+            {audit.evidence.combinedEvidenceStatus === "adp_only" ? "📋 ADP" : "📊 Act"}
+          </Badge>
+        )}
+      </div>
+      {/* Fallback reason tooltip */}
+      {audit?.evidence?.fallbackReason && (
+        <div className="ml-7 text-[8px] text-yellow-400/70 italic">
+          {audit.evidence.fallbackReason}
+        </div>
+      )}
+      {audit && audit.actualsWeight > 0 && (
+        <div className="ml-7 flex items-center gap-2 text-[9px] flex-wrap">
+          <span className="text-muted-foreground">
+            Base {Math.round(audit.baselineValue).toLocaleString()}
+          </span>
+          <span className="text-muted-foreground/50">×</span>
+          <span className="text-muted-foreground">
+            {Math.round((1 - audit.actualsWeight) * 100)}%
+          </span>
+          <span className="text-muted-foreground/50">+</span>
+          <span className="text-muted-foreground">
+            Act {audit.actualsValue.toFixed(1)}
+          </span>
+          <span className="text-muted-foreground/50">×</span>
+          <span className="text-muted-foreground">
+            {Math.round(audit.actualsWeight * 100)}%
+          </span>
+          <span className={audit.blendDelta > 0 ? "text-emerald-400 font-bold" : audit.blendDelta < 0 ? "text-red-400 font-bold" : "text-muted-foreground"}>
+            {audit.blendDelta > 0 ? "▲" : audit.blendDelta < 0 ? "▼" : "●"}
+            {audit.blendDelta !== 0 ? ` ${Math.abs(Math.round(audit.blendDelta)).toLocaleString()}` : " same"}
+          </span>
+          <span className="text-muted-foreground/50">
+            ({audit.ppg.toFixed(1)} PPG, Wk {audit.lastCompletedWeek})
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Two-Way Team Column (sends/receives/net like 3-way) ────
+function TwoWayTeamColumn({
   teamName,
-  assets,
-  totalValue,
+  sentAssets,
+  receivedAssets,
+  sentValue,
+  receivedValue,
+  netValue,
   isWinner,
   tradeSeason,
   seasonAdpMap,
+  colorClass,
   blendedAudit,
+  side = "left",
 }: {
   teamName: string;
-  assets: TradeAssetRow[];
-  totalValue: number;
+  sentAssets: TradeAssetRow[];
+  receivedAssets: TradeAssetRow[];
+  sentValue: number;
+  receivedValue: number;
+  netValue: number;
   isWinner: boolean;
   tradeSeason: string;
   seasonAdpMap: Map<string, Map<string, number>>;
+  colorClass: string;
   blendedAudit?: BlendedAuditEntry[];
+  side?: "left" | "right";
 }) {
-  // Build audit lookup by player name
   const auditByName = useMemo(() => {
     const map = new Map<string, BlendedAuditEntry>();
     if (blendedAudit) {
@@ -380,69 +500,78 @@ function AssetColumn({
   }, [blendedAudit]);
 
   return (
-    <div>
-      <div className="text-[11px] font-bold text-muted-foreground mb-2 flex items-center gap-1.5">
-        {getTeamEmoji(teamName)} {teamName} sends →
+    <div className="space-y-2">
+      {/* Team header */}
+      <div className="flex items-center gap-1.5">
+        <span className="text-sm">{getTeamEmoji(teamName)}</span>
+        <span className="text-xs font-bold truncate">{teamName}</span>
+        {isWinner && (
+          <Badge className="text-[8px] px-1 py-0 bg-emerald-500/20 text-emerald-400 border-emerald-500/30 border ml-auto">
+            👑 WINNER
+          </Badge>
+        )}
       </div>
-      <div className="space-y-1">
-        {assets.map((a) => {
-          const baseVal = getAssetValue(a, tradeSeason, seasonAdpMap);
-          const audit = a.asset_type === "player" && a.player_name ? auditByName.get(a.player_name) : undefined;
-          const displayValue = audit ? audit.blendedValue : baseVal;
 
-          return (
-            <div key={a.id} className="space-y-0.5">
-              <div className="flex items-center gap-1.5 text-xs">
-                {a.asset_type === "player" ? (
-                  <Badge className={`text-[9px] px-1 py-0 ${POSITION_BG_CLASSES[a.player_position ?? ""] ?? "bg-muted"}`}>
-                    {a.player_position}
-                  </Badge>
-                ) : (
-                  <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/10 border-amber-500/30 text-amber-400">📋</Badge>
-                )}
-                <span className="truncate flex-1">
-                  {a.asset_type === "player" ? a.player_name : formatPickLabel(a)}
-                </span>
-                <span className="text-[10px] font-mono text-muted-foreground">({Math.round(displayValue).toLocaleString()})</span>
-              </div>
-              {/* Blended audit detail */}
-              {audit && audit.actualsWeight > 0 && (
-                <div className="ml-7 flex items-center gap-2 text-[9px] flex-wrap">
-                  <span className="text-muted-foreground">
-                    Base {Math.round(audit.baselineValue).toLocaleString()}
-                  </span>
-                  <span className="text-muted-foreground/50">×</span>
-                  <span className="text-muted-foreground">
-                    {Math.round((1 - audit.actualsWeight) * 100)}%
-                  </span>
-                  <span className="text-muted-foreground/50">+</span>
-                  <span className="text-muted-foreground">
-                    Act {audit.actualsValue.toFixed(1)}
-                  </span>
-                  <span className="text-muted-foreground/50">×</span>
-                  <span className="text-muted-foreground">
-                    {Math.round(audit.actualsWeight * 100)}%
-                  </span>
-                  <span className={audit.blendDelta > 0 ? "text-emerald-400 font-bold" : audit.blendDelta < 0 ? "text-red-400 font-bold" : "text-muted-foreground"}>
-                    {audit.blendDelta > 0 ? "▲" : audit.blendDelta < 0 ? "▼" : "●"}
-                    {audit.blendDelta !== 0 ? ` ${Math.abs(Math.round(audit.blendDelta)).toLocaleString()}` : " same"}
-                  </span>
-                  <span className="text-muted-foreground/50">
-                    ({audit.ppg.toFixed(1)} PPG, Wk {audit.lastCompletedWeek})
-                  </span>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      <div className="mt-2 pt-1.5 border-t border-border/30 flex items-center justify-between">
-        <span className="text-[10px] font-bold text-muted-foreground">Package Total</span>
-        <span className="text-xs font-bold font-mono">{Math.round(totalValue).toLocaleString()} pts</span>
-      </div>
-      {isWinner && (
-        <Badge className="text-[9px] px-1.5 py-0 bg-emerald-500/20 text-emerald-400 border-emerald-500/30 border mt-1.5 w-fit">WINNER</Badge>
+      {/* Sends section */}
+      {sentAssets.length > 0 && (
+        <div>
+          <div className={`text-[10px] font-bold ${colorClass} mb-0.5`}>{side === "left" ? "Sends →" : "← Sends"}</div>
+          {sentAssets.map((a) => (
+            <TradeAssetItem
+              key={a.id}
+              a={a}
+              tradeSeason={tradeSeason}
+              seasonAdpMap={seasonAdpMap}
+              audit={a.asset_type === "player" && a.player_name ? auditByName.get(a.player_name) : undefined}
+            />
+          ))}
+          <div className="mt-1 pt-1 border-t border-border/30 flex items-center justify-between">
+            <span className="text-[10px] text-muted-foreground">Sent</span>
+            <span className="text-[10px] font-mono font-bold text-red-400">
+              −{Math.round(sentValue).toLocaleString()}
+            </span>
+          </div>
+        </div>
       )}
+
+      {/* Receives section */}
+      {receivedAssets.length > 0 && (
+        <div>
+          <div className={`text-[10px] font-bold ${colorClass} mb-0.5`}>{side === "left" ? "Receives ←" : "→ Receives"}</div>
+          {receivedAssets.map((a) => (
+            <TradeAssetItem
+              key={a.id}
+              a={a}
+              tradeSeason={tradeSeason}
+              seasonAdpMap={seasonAdpMap}
+              audit={a.asset_type === "player" && a.player_name ? auditByName.get(a.player_name) : undefined}
+            />
+          ))}
+          <div className="mt-1 pt-1 border-t border-border/30 flex items-center justify-between">
+            <span className="text-[10px] text-muted-foreground">Received</span>
+            <span className="text-[10px] font-mono font-bold text-emerald-400">
+              +{Math.round(receivedValue).toLocaleString()}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Net value */}
+      <div className="pt-1 border-t border-border/50 flex items-center justify-between">
+        <span className="text-[10px] font-bold text-muted-foreground">Net Value</span>
+        <span
+          className={`text-xs font-bold font-mono ${
+            netValue > 0
+              ? "text-emerald-400"
+              : netValue < 0
+                ? "text-red-400"
+                : "text-muted-foreground"
+          }`}
+        >
+          {netValue >= 0 ? "+" : ""}
+          {Math.round(netValue).toLocaleString()}
+        </span>
+      </div>
     </div>
   );
 }

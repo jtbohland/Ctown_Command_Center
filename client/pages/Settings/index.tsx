@@ -26,7 +26,7 @@ export default function SettingsPage() {
   const players = playersData?.players ?? [];
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploadMode, setUploadMode] = useState<"players" | "keepers" | "dynasty">("players");
+  const [uploadMode, setUploadMode] = useState<"players" | "keepers" | "dynasty" | "rookie">("players");
   const [keeperTeamFilter, setKeeperTeamFilter] = useState<number | null>(null);
   const [keeperSearch, setKeeperSearch] = useState("");
   const [debouncedKeeperSearch, setDebouncedKeeperSearch] = useState("");
@@ -209,6 +209,13 @@ export default function SettingsPage() {
                   <Icon icon="shield" className="h-3.5 w-3.5 inline mr-1" />
                   Keeper List
                 </button>
+                <button
+                  className={`flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${uploadMode === "rookie" ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground hover:bg-accent"}`}
+                  onClick={() => setUploadMode("rookie")}
+                >
+                  <Icon icon="baby" className="h-3.5 w-3.5 inline mr-1" />
+                  Rookie Rankings
+                </button>
               </div>
 
               {/* Mode description */}
@@ -229,11 +236,17 @@ export default function SettingsPage() {
                       Columns: RK, TIERS, PLAYER NAME, TEAM, POS, AGE
                     </span>
                   </>
-                ) : (
+                ) : uploadMode === "keepers" ? (
                   <>
                     <strong>Keeper mode:</strong> Bulk reassign all keepers. Clears existing and assigns new ones.
                     <br />
                     <span className="text-[10px] opacity-75">Columns: team (team name), player (player name)</span>
+                  </>
+                ) : (
+                  <>
+                    <strong>Rookie Rankings mode:</strong> Import a rookie draft class with overall pick order, position, and age.
+                    <br />
+                    <span className="text-[10px] opacity-75">Columns: Rank/Pick, Player Name, Pos, Age (optional), Year (optional)</span>
                   </>
                 )}
               </div>

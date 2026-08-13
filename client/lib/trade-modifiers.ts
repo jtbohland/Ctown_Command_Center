@@ -1,6 +1,6 @@
 // ─── Configurable Trade Model Modifiers ──────────────────────
 // Shared type + defaults for the 11 slider-driven parameters
-// that control the Arm Chair Dealer valuation engine.
+// that control The C-Town Exchange valuation engine.
 
 export interface TradeModifiers {
   // Positional scarcity multipliers (1.0 = no effect)
@@ -21,6 +21,9 @@ export interface TradeModifiers {
   fairTolerance: number;    // Default 5    — ±% for "Fair Catch"
   verdictScale: number;     // Default 1.0  — multiplier on verdict thresholds (lower = stricter)
 
+  // Fallback valuation
+  unrankedFallbackFactor: number; // Default 0.50 — multiplier on ranked tail for unranked players (0.25-0.75)
+
   // Déjà Vu
   dejaVuSensitivity: number; // Default 3 — max matches to show (1-10)
 }
@@ -36,6 +39,7 @@ export const DEFAULT_MODIFIERS: TradeModifiers = {
   valueCurve: 0.6,
   fairTolerance: 5,
   verdictScale: 1.0,
+  unrankedFallbackFactor: 0.50,
   dejaVuSensitivity: 3,
 };
 
@@ -48,7 +52,7 @@ export interface SliderConfig {
   step: number;
   defaultValue: number;
   format: (v: number) => string;
-  category: "positional" | "dynasty" | "model" | "verdict" | "history";
+  category: "positional" | "dynasty" | "model" | "verdict" | "history" | "fallback";
 }
 
 const pctFormat = (v: number) => `${Math.round((v - 1) * 100)}%`;
@@ -154,6 +158,17 @@ export const SLIDER_CONFIGS: SliderConfig[] = [
     category: "verdict",
   },
 
+  // ── Fallback Valuation ──
+  {
+    key: "unrankedFallbackFactor",
+    label: "Unranked Player Baseline",
+    description: "How much value unranked players get relative to the worst ranked players at their position",
+    min: 0.25, max: 0.75, step: 0.05,
+    defaultValue: 0.50,
+    format: (v) => `${Math.round(v * 100)}% of tail`,
+    category: "fallback",
+  },
+
   // ── History ──
   {
     key: "dejaVuSensitivity",
@@ -171,5 +186,6 @@ export const CATEGORY_LABELS: Record<SliderConfig["category"], { label: string; 
   dynasty: { label: "Dynasty Factors", emoji: "👑" },
   model: { label: "Model Shape", emoji: "📐" },
   verdict: { label: "Verdict Calibration", emoji: "⚖️" },
+  fallback: { label: "Fallback Valuation", emoji: "🪤" },
   history: { label: "History", emoji: "🔮" },
 };

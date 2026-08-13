@@ -14,7 +14,7 @@ export default api({
     csvFile: z.object({
       files: z.array(readableFileSchema).min(1),
     }),
-    mode: z.enum(["players", "keepers", "dynasty"]).default("players"),
+    mode: z.enum(["players", "keepers", "dynasty", "rookie"]).default("players"),
   }),
 
   output: z.object({
@@ -163,6 +163,70 @@ export default api({
       };
     }
 
+    // ── ROOKIE MODE: CSV with pick/overall, player_name, position, age ──
+    if (mode === "rookie") {
+      const rNameIdx = header.findIndex((h: string) => h.includes("player") || (h.includes("name") && !h.includes("team")));
+      const rPosIdx = header.findIndex((h: string) => h === "pos" || h === "position");
+      const rPickIdx = header.findIndex((h: string) => h === "overall" || h === "pick" || h === "overall_pick" || h === "rk" || h === "rank");
+      const rAgeIdx = header.findIndex((h: string) => h === "age");
+      const rYearIdx = header.findIndex((h: string) => h === "year" || h === "draft_year" || h === "nfl_draft_year");
+
+      if (rNameIdx === -1 || rPosIdx === -1) {
+        throw new Error("Rookie CSV must have 'player name' and 'pos' columns. Found: " + header.join(", "));
+      }
+
+      // Detect draft year from header or default to next year
+      const currentYear = new Date().getFullYear();
+      let draftYear = currentYear + 1;
+
+      const rows: Array<{ year: number; pick: number; name: string; pos: string; age: number | null }> = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols: string[] = parseCsvLine(lines[i]);
+        const rawName = (cols[rNameIdx] || "").trim();
+        const posRaw = (cols[rPosIdx] || "").trim();
+        if (!rawName || !posRaw) continue;
+        const position = posRaw.replace(/[0-9]/g, "").trim();
+        if (!["QB", "RB", "WR", "TE"].includes(position)) continue;
+
+        const pick = rPickIdx >= 0 ? parseInt(cols[rPickIdx]) || i : i;
+        const age = rAgeIdx >= 0 ? parseInt(cols[rAgeIdx]) || null : null;
+        const year = rYearIdx >= 0 ? parseInt(cols[rYearIdx]) || draftYear : draftYear;
+        draftYear = year; // use detected year for all rows
+
+        rows.push({ year, pick, name: rawName.replace(/\./g, "").replace(/\s+/g, " ").trim(), pos: position, age });
+      }
+
+      if (rows.length === 0) {
+        return { imported: 0, updated: 0, message: "No rookie players parsed from CSV." };
+      }
+
+      // Batch upsert in chunks of 50
+      const CHUNK = 50;
+      for (let c = 0; c < rows.length; c += CHUNK) {
+        const chunk = rows.slice(c, c + CHUNK);
+        const values: string[] = [];
+        const params: (string | number | null)[] = [];
+        for (let j = 0; j < chunk.length; j++) {
+          const r = chunk[j];
+          const offset = j * 5;
+          values.push(`($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5})`);
+          params.push(r.year, r.pick, r.name, r.pos, r.age);
+        }
+        await ctx.integrations.apps_db.execute(
+          `INSERT INTO ffwr_rookie_classes (nfl_draft_year, overall_pick, player_name, position, age_on_draft_day)
+           VALUES ${values.join(", ")}
+           ON CONFLICT (nfl_draft_year, overall_pick) DO UPDATE SET
+             player_name = EXCLUDED.player_name,
+             position = EXCLUDED.position,
+             age_on_draft_day = COALESCE(EXCLUDED.age_on_draft_day, ffwr_rookie_classes.age_on_draft_day)`,
+          params,
+          { label: `Batch upsert rookies ${c + 1}-${c + chunk.length}` }
+        );
+      }
+
+      return { imported: rows.length, updated: 0, message: `Imported ${rows.length} rookies for ${rows[0].year} draft class.` };
+    }
+
     // ── PLAYER/RANKINGS MODE ──
     // Flexible column detection
     // "player (bye)" or "player" → name col (also extract NFL team + bye from it)
@@ -297,12 +361,23 @@ export default api({
       };
     }
 
-    // Upsert one row at a time for reliability (execute may not return rowCount for multi-row)
-    for (let i = 0; i < batch.length; i++) {
-      const row = batch[i];
+    // Batch upsert in chunks of 25 (14 params per row × 25 = 350 params)
+    const CHUNK_SIZE = 25;
+    for (let c = 0; c < batch.length; c += CHUNK_SIZE) {
+      const chunk = batch.slice(c, c + CHUNK_SIZE);
+      const values: string[] = [];
+      const params: (string | number | null)[] = [];
+      for (let j = 0; j < chunk.length; j++) {
+        const row = chunk[j];
+        const o = j * 14; // 14 params per row
+        values.push(`($${o+1}, $${o+2}, $${o+3}, $${o+4}, $${o+5}, $${o+6}, $${o+7}, $${o+8}, $${o+9}, $${o+10}, $${o+11}, $${o+12}, $${o+13}, $${o+14})`);
+        params.push(row.name, row.position, row.nflTeam, row.adpRank, row.dynRank,
+          row.posRank, row.impliedPts, row.byeWeek, row.draftRank, row.tier,
+          row.upside, row.bust, row.sos, row.age);
+      }
       await ctx.integrations.apps_db.execute(
         `INSERT INTO ffwr_players (name, position, nfl_team, adp_rank, dynasty_rank, positional_rank, implied_team_points, bye_week, draft_rank, draft_tier, upside, bust, sos, age)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+         VALUES ${values.join(", ")}
          ON CONFLICT (name, position) DO UPDATE SET
            nfl_team = COALESCE(EXCLUDED.nfl_team, ffwr_players.nfl_team),
            adp_rank = COALESCE(EXCLUDED.adp_rank, ffwr_players.adp_rank),
@@ -316,12 +391,10 @@ export default api({
            bust = COALESCE(EXCLUDED.bust, ffwr_players.bust),
            sos = COALESCE(EXCLUDED.sos, ffwr_players.sos),
            age = COALESCE(EXCLUDED.age, ffwr_players.age)`,
-        [row.name, row.position, row.nflTeam, row.adpRank, row.dynRank,
-         row.posRank, row.impliedPts, row.byeWeek, row.draftRank, row.tier,
-         row.upside, row.bust, row.sos, row.age],
-        { label: `Upsert: ${row.name} (${row.position})` }
+        params,
+        { label: `Batch upsert players ${c + 1}-${c + chunk.length}` }
       );
-      imported++;
+      imported += chunk.length;
     }
 
     return {

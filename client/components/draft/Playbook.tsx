@@ -9,13 +9,13 @@ export default function Playbook() {
   const sections = [
     {
       id: "overview",
-      icon: "🛋️",
-      title: "What is the Arm Chair Dealer?",
+      icon: "🫱🏻‍🫲🏽",
+      title: "What is The C-Town Exchange?",
       content: (
         <div className="space-y-3 text-sm text-muted-foreground leading-relaxed">
           <p>
-            The <span className="text-foreground font-semibold">Arm Chair Dealer</span> is your dynasty fantasy football trade command center. 
-            It evaluates trades using ADP-based player valuations, tracks every trade in league history, and helps you 
+            <span className="text-foreground font-semibold">The C-Town Exchange</span> is your dynasty fantasy football trade command center. 
+            It evaluates trades using ADP + in-season performance data, tracks every trade in league history, and helps you 
             make informed decisions before pulling the trigger on a deal.
           </p>
           <p>
@@ -78,31 +78,34 @@ export default function Playbook() {
         <div className="space-y-4 text-sm text-muted-foreground leading-relaxed">
           <p>
             The <span className="text-foreground font-semibold">⚙️ Customize Model</span> panel on the Deal Desk tab lets you adjust
-            how the Arm Chair Dealer values players and picks. All 11 sliders have sensible defaults based on C-Town league conventions — 
+            how The C-Town Exchange values players and picks.             All 12 sliders have sensible defaults based on C-Town league conventions — 
             you only need to touch them if you want to explore "what if" scenarios.
           </p>
           <div className="space-y-3">
-            {Object.entries(CATEGORY_LABELS).map(([cat, meta]) => {
-              const configs = SLIDER_CONFIGS.filter((c) => c.category === cat);
-              if (configs.length === 0) return null;
-              return (
-                <div key={cat} className="bg-muted/30 rounded-lg p-3 border border-border/50">
-                  <div className="text-xs font-bold text-foreground mb-2">{meta.emoji} {meta.label}</div>
-                  <div className="space-y-1.5">
-                    {configs.map((c) => (
-                      <div key={c.key} className="flex items-baseline gap-2">
-                        <span className="text-xs font-semibold text-foreground min-w-[140px]">{c.label}</span>
-                        <span className="text-[10px] font-mono text-muted-foreground">Default: {c.format(c.defaultValue)}</span>
-                        <span className="text-[10px] text-muted-foreground/70">— {c.description}</span>
-                      </div>
-                    ))}
+            {Object.entries(CATEGORY_LABELS)
+              .filter(([cat]) => !["model", "verdict", "fallback"].includes(cat))
+              .map(([cat, meta]) => {
+                const configs = SLIDER_CONFIGS.filter((c) => c.category === cat);
+                if (configs.length === 0) return null;
+                return (
+                  <div key={cat} className="bg-muted/30 rounded-lg p-3 border border-border/50">
+                    <div className="text-xs font-bold text-foreground mb-2">{meta.emoji} {meta.label}</div>
+                    <div className="space-y-1.5">
+                      {configs.map((c) => (
+                        <div key={c.key} className="flex items-baseline gap-2">
+                          <span className="text-xs font-semibold text-foreground min-w-[140px]">{c.label}</span>
+                          <span className="text-[10px] font-mono text-muted-foreground">Default: {c.format(c.defaultValue)}</span>
+                          <span className="text-[10px] text-muted-foreground/70">— {c.description}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
           </div>
           <p className="text-xs text-muted-foreground/70">
-            Modified sliders show a yellow badge on the panel. Use "🔄 Reset All" to return to league defaults.
+            Model Shape, Verdict Calibration, and Fallback Valuation are tucked under <span className="font-semibold text-muted-foreground">▶ Advanced Settings</span> in the panel. 
+            Modified sliders show a yellow badge. Use "🔄 Reset All" to return to league defaults.
           </p>
         </div>
       ),
@@ -130,7 +133,7 @@ export default function Playbook() {
         <span className="text-4xl">📖</span>
         <h2 className="text-xl font-extrabold mt-2">The Playbook</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Everything you need to know about the Arm Chair Dealer
+          Everything you need to know about The C-Town Exchange
         </p>
       </div>
 

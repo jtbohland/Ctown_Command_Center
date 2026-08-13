@@ -4,7 +4,7 @@ const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
 export default api({
   name: "InitTradeTables",
-  description: "Creates trade calculator tables for the Arm Chair Dealer feature.",
+  description: "Creates trade calculator tables for The C-Town Exchange feature.",
 
   integrations: {
     apps_db: postgres(APPS_DB),

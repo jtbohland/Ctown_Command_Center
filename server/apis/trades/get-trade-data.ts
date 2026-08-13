@@ -59,6 +59,7 @@ const TeamSchema = z.object({
   team_name: z.string(),
   manager_name: z.string(),
   color: z.string(),
+  is_my_team: z.coerce.boolean(),
 });
 
 const HistoricalAdpSchema = z.object({
@@ -171,7 +172,7 @@ export default api({
     );
 
     const teams = await ctx.integrations.apps_db.query(
-      `SELECT id, team_name, manager_name, color FROM ffwr_teams ORDER BY id LIMIT 11`,
+      `SELECT id, team_name, manager_name, color, CASE WHEN is_my_team THEN true ELSE false END as is_my_team FROM ffwr_teams ORDER BY id LIMIT 11`,
       TeamSchema,
       undefined,
       { label: "Fetch teams" }
