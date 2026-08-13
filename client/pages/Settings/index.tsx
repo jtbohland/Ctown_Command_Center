@@ -26,7 +26,7 @@ export default function SettingsPage() {
   const players = playersData?.players ?? [];
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploadMode, setUploadMode] = useState<"players" | "keepers" | "dynasty" | "rookie">("players");
+  const [uploadMode, setUploadMode] = useState<"players" | "keepers" | "dynasty" | "rookie" | "roster">("players");
   const [keeperTeamFilter, setKeeperTeamFilter] = useState<number | null>(null);
   const [keeperSearch, setKeeperSearch] = useState("");
   const [debouncedKeeperSearch, setDebouncedKeeperSearch] = useState("");
@@ -216,6 +216,13 @@ export default function SettingsPage() {
                   <Icon icon="baby" className="h-3.5 w-3.5 inline mr-1" />
                   Rookie Rankings
                 </button>
+                <button
+                  className={`flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${uploadMode === "roster" ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground hover:bg-accent"}`}
+                  onClick={() => setUploadMode("roster")}
+                >
+                  <Icon icon="clipboard-list" className="h-3.5 w-3.5 inline mr-1" />
+                  Roster Upload
+                </button>
               </div>
 
               {/* Mode description */}
@@ -242,11 +249,17 @@ export default function SettingsPage() {
                     <br />
                     <span className="text-[10px] opacity-75">Columns: team (team name), player (player name)</span>
                   </>
-                ) : (
+                ) : uploadMode === "rookie" ? (
                   <>
                     <strong>Rookie Rankings mode:</strong> Import a rookie draft class with overall pick order, position, and age.
                     <br />
                     <span className="text-[10px] opacity-75">Columns: Rank/Pick, Player Name, Pos, Age (optional), Year (optional)</span>
+                  </>
+                ) : (
+                  <>
+                    <strong>Roster Upload mode:</strong> Assign players to team rosters via CSV. Clears existing assignments and re-applies keepers.
+                    <br />
+                    <span className="text-[10px] opacity-75">Columns: team (team name or manager), player (player name)</span>
                   </>
                 )}
               </div>

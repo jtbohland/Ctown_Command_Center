@@ -23,9 +23,21 @@ interface Team {
   is_my_team?: boolean;
 }
 
+interface DraftPick2026 {
+  round: number;
+  pick_in_round: number;
+  overall_pick: number;
+  team_id: number;
+  team_name: string;
+  manager_name: string;
+  player_id: number | null;
+  is_complete: boolean;
+}
+
 interface Props {
   draftCapital: DraftCapitalRow[];
   teams: Team[];
+  draftPicks2026?: DraftPick2026[];
 }
 
 // ─── Constants ──────────────────────────────────────────────
@@ -81,7 +93,7 @@ const DraftOrderRow = memo(function DraftOrderRow({
   );
 });
 
-export default function DraftCapitalView({ draftCapital, teams }: Props) {
+export default function DraftCapitalView({ draftCapital, teams, draftPicks2026 }: Props) {
   const [yearFilter, setYearFilter] = useState<string>("all");
   const [trackerRound, setTrackerRound] = useState<number | "all">("all");
 
@@ -103,16 +115,42 @@ export default function DraftCapitalView({ draftCapital, teams }: Props) {
     return draftCapital.filter((dc) => dc.year === Number(yearFilter));
   }, [draftCapital, yearFilter]);
 
+  // Convert 2026 draft picks into DraftCapitalRow format
+  const capital2026 = useMemo(() => {
+    if (!draftPicks2026 || draftPicks2026.length === 0) return [];
+    return draftPicks2026.map((dp, idx) => {
+      // Find the team that owns this pick
+      const ownerTeam = teams.find((t) => t.id === dp.team_id);
+      // In ffwr_draft_picks, team_id already reflects traded ownership,
+      // and original_team_id = pick_in_round order (pick slot)
+      // Use pick_in_round to infer original team (slot-based)
+      const originalTeam = teams.find((t) => t.id === dp.pick_in_round) ?? ownerTeam;
+      return {
+        id: -(idx + 1),
+        year: 2026,
+        round: dp.round,
+        original_team_id: originalTeam?.id ?? dp.team_id,
+        current_team_id: dp.team_id,
+        original_team_name: originalTeam?.team_name ?? dp.team_name,
+        current_team_name: dp.team_name,
+      } as DraftCapitalRow;
+    });
+  }, [draftPicks2026, teams]);
+
   // For future years without data, generate virtual "full" capital
   const virtualCapital = useMemo(() => {
     if (yearFilter === "all") return [];
     const yr = Number(yearFilter);
+
+    // 2026 uses draft board data
+    if (yr === 2026 && capital2026.length > 0) return capital2026;
+
     const existingForYear = draftCapital.filter((dc) => dc.year === yr);
     if (existingForYear.length > 0) return []; // data exists, don't virtualize
 
     // Generate full slate: every team owns all their picks
     const virtual: DraftCapitalRow[] = [];
-    let fakeId = -1;
+    let fakeId = -10000;
     for (const team of teams) {
       for (let round = 1; round <= TOTAL_ROUNDS; round++) {
         virtual.push({
@@ -127,7 +165,7 @@ export default function DraftCapitalView({ draftCapital, teams }: Props) {
       }
     }
     return virtual;
-  }, [yearFilter, draftCapital, teams]);
+  }, [yearFilter, draftCapital, teams, capital2026]);
 
   const allPicks = useMemo(() => [...filtered, ...virtualCapital], [filtered, virtualCapital]);
 

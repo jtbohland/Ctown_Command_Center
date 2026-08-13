@@ -10,6 +10,7 @@ import DraftCapitalView from "./DraftCapitalView";
 import GoodBadUgly from "./GoodBadUgly";
 import SirenSale from "./SirenSale";
 import Playbook from "./Playbook";
+import ReduxRosters from "./ReduxRosters";
 
 
 export default function ArmChairDealer() {
@@ -54,6 +55,9 @@ export default function ArmChairDealer() {
   );
 
   const tradeActuals: TradeActualsResult[] = actualsData?.results ?? [];
+
+  // Fetch 2026 draft picks for Treasury (from draft board, not draft_capital)
+  const { data: rosterData } = useApiData("GetRosterData", {});
 
   if (loading) {
     return (
@@ -119,6 +123,7 @@ export default function ArmChairDealer() {
             <TabsTrigger value="gbu" className="text-xs gap-1">🏛️ The Verdicts</TabsTrigger>
             <TabsTrigger value="siren" className="text-xs gap-1">🚨 Sound The Alarm</TabsTrigger>
             <TabsTrigger value="capital" className="text-xs gap-1">💰 The Treasury</TabsTrigger>
+            <TabsTrigger value="rosters" className="text-xs gap-1">🏟️ Redux Rosters</TabsTrigger>
 
           </TabsList>
         </div>
@@ -140,11 +145,15 @@ export default function ArmChairDealer() {
         </TabsContent>
 
         <TabsContent value="capital" className="flex-1 overflow-auto px-5 py-4">
-          <DraftCapitalView draftCapital={draftCapital} teams={teams} />
+          <DraftCapitalView draftCapital={draftCapital} teams={teams} draftPicks2026={rosterData?.draftPicks2026} />
         </TabsContent>
 
         <TabsContent value="playbook" className="flex-1 overflow-auto px-5 py-4">
           <Playbook />
+        </TabsContent>
+
+        <TabsContent value="rosters" className="flex-1 overflow-auto px-5 py-4">
+          <ReduxRosters teams={teams} />
         </TabsContent>
 
       </Tabs>

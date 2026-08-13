@@ -40,6 +40,9 @@ import SeedActualsFromFile from './trades/seed-actuals-from-file.js';
 import GetLoadedActualSeasons from './trades/get-loaded-actual-seasons.js';
 import RepairTrade28Assets from './trades/repair-trade-28-assets.js';
 import ComputeTradeActuals from './trades/compute-trade-actuals.js';
+import SeedRosters from './trades/seed-rosters.js';
+import GetRosterData from './trades/get-roster-data.js';
+import Redraft from './trades/redraft.js';
 
 
 const apis = {
@@ -85,6 +88,9 @@ const apis = {
   BuildActualsScores,
   RepairTrade28Assets,
   ComputeTradeActuals,
+  SeedRosters,
+  GetRosterData,
+  Redraft,
 } as const;
 
 export default apis;
