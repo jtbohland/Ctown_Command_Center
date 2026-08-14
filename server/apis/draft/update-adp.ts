@@ -1,10 +1,11 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
+import { normalizePlayerName } from "../../lib/normalize-player-name.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
 export default api({
   name: "UpdateAdpFromCsv",
-  description: "Accepts raw CSV text and upserts ADP rankings into ffwr_players.",
+  description: "Upserts daily ADP rankings into ffwr_players with canonical name normalization.",
 
   integrations: {
     apps_db: postgres(APPS_DB),
@@ -24,7 +25,6 @@ export default api({
     const lines = csvText.split(/\r?\n/).filter((l) => l.trim().length > 0);
     if (lines.length < 2) throw new Error("CSV must have header + data rows");
 
-    // Parse header
     const header = lines[0].split(",").map((h) => h.trim().toLowerCase().replace(/['"]/g, ""));
     const rankIdx = header.indexOf("rank");
     const nameIdx = header.findIndex((h) => h.startsWith("player"));
@@ -33,7 +33,7 @@ export default api({
 
     if (nameIdx === -1 || posIdx === -1) throw new Error("Missing player/pos columns");
 
-    // Parse "PlayerName   TEAM (bye)" -> { name, team, bye }
+    // Parse "PlayerName   TEAM (bye)" → { name, team, bye }
     function parsePlayerField(raw: string): { name: string; team: string; bye: number | null } {
       const byeMatch = raw.match(/\((\d+)\)\s*$/);
       const bye = byeMatch ? parseInt(byeMatch[1]) : null;
@@ -41,10 +41,17 @@ export default api({
       const teamMatch = cleaned.match(/\s{2,}([A-Z]{2,4})\s*$/) || cleaned.match(/\s([A-Z]{2,4})\s*$/);
       const team = teamMatch ? teamMatch[1] : "";
       if (team) cleaned = cleaned.replace(new RegExp(`\\s+${team}\\s*$`), "").trim();
-      return { name: cleaned.replace(/\./g, "").replace(/\s+/g, " ").trim(), team: team || "FA", bye };
+      // Normalize name through canonical normalizer
+      return { name: normalizePlayerName(cleaned), team: team || "FA", bye };
     }
 
-    let processed = 0;
+    // Batch upserts for performance
+    type Row = {
+      name: string; position: string; nflTeam: string;
+      adpRank: number | null; posRank: number | null;
+      byeWeek: number | null; draftRank: number | null;
+    };
+    const batch: Row[] = [];
     let skipped = 0;
 
     for (let i = 1; i < lines.length; i++) {
@@ -63,21 +70,35 @@ export default api({
       const draftRank = rankIdx >= 0 ? parseFloat(cols[rankIdx]) || null : null;
       const adpRank = avgIdx >= 0 ? parseFloat(cols[avgIdx]) || null : null;
 
-      await ctx.integrations.apps_db.execute(
-        `INSERT INTO ffwr_players (name, position, nfl_team, adp_rank, positional_rank, bye_week, draft_rank)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         ON CONFLICT (name, position) DO UPDATE SET
-           nfl_team = COALESCE(EXCLUDED.nfl_team, ffwr_players.nfl_team),
-           adp_rank = COALESCE(EXCLUDED.adp_rank, ffwr_players.adp_rank),
-           positional_rank = COALESCE(EXCLUDED.positional_rank, ffwr_players.positional_rank),
-           bye_week = COALESCE(EXCLUDED.bye_week, ffwr_players.bye_week),
-           draft_rank = COALESCE(EXCLUDED.draft_rank, ffwr_players.draft_rank)`,
-        [parsed.name, position, parsed.team, adpRank, posRank, parsed.bye, draftRank],
-        { label: `Upsert: ${parsed.name}` }
-      );
-      processed++;
+      batch.push({ name: parsed.name, position, nflTeam: parsed.team, adpRank, posRank, byeWeek: parsed.bye, draftRank });
     }
 
-    return { processed, skipped, message: `Updated ${processed} players, skipped ${skipped} K/DST.` };
+    // Batch upsert in chunks of 50 (7 params per row)
+    const CHUNK = 50;
+    for (let c = 0; c < batch.length; c += CHUNK) {
+      const chunk = batch.slice(c, c + CHUNK);
+      const values: string[] = [];
+      const params: (string | number | null)[] = [];
+      for (let j = 0; j < chunk.length; j++) {
+        const row = chunk[j];
+        const o = j * 7;
+        values.push(`($${o+1}, $${o+2}, $${o+3}, $${o+4}, $${o+5}, $${o+6}, $${o+7})`);
+        params.push(row.name, row.position, row.nflTeam, row.adpRank, row.posRank, row.byeWeek, row.draftRank);
+      }
+      await ctx.integrations.apps_db.execute(
+        `INSERT INTO ffwr_players (name, position, nfl_team, adp_rank, positional_rank, bye_week, draft_rank)
+         VALUES ${values.join(", ")}
+         ON CONFLICT (name, position) DO UPDATE SET
+           nfl_team = COALESCE(EXCLUDED.nfl_team, ffwr_players.nfl_team),
+           adp_rank = EXCLUDED.adp_rank,
+           positional_rank = EXCLUDED.positional_rank,
+           bye_week = COALESCE(EXCLUDED.bye_week, ffwr_players.bye_week),
+           draft_rank = EXCLUDED.draft_rank`,
+        params,
+        { label: `ADP batch ${Math.floor(c / CHUNK) + 1}` }
+      );
+    }
+
+    return { processed: batch.length, skipped, message: `Updated ${batch.length} players, skipped ${skipped} K/DST.` };
   },
 });

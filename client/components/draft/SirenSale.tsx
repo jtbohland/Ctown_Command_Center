@@ -6,9 +6,16 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Icon } from "@/components/ui/icon";
+import { Textarea } from "@/components/ui/textarea";
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
 import type { TeamRow, PlayerRow, DraftCapitalRow } from "@/lib/trade-utils";
 import { formatDropdownLabel } from "@/lib/player-values";
+
+/** Fixed future seasons for Siren Sale — no backlog, future trades only */
+const SIREN_SEASONS = [
+  "2026-27", "2027-28", "2028-29", "2029-30", "2030-31",
+  "2031-32", "2032-33", "2033-34", "2034-35",
+] as const;
 
 interface Asset {
   type: "player" | "pick";
@@ -30,16 +37,17 @@ interface Props {
   draftCapital: DraftCapitalRow[];
   draftPicks2026: DraftPick2026[];
   onSaved: () => void;
-  seasons: string[];
 }
 
-export default function SirenSale({ teams, players, draftCapital, draftPicks2026, onSaved, seasons }: Props) {
+export default function SirenSale({ teams, players, draftCapital, draftPicks2026, onSaved }: Props) {
   const [teamAId, setTeamAId] = useState<number | null>(null);
   const [teamBId, setTeamBId] = useState<number | null>(null);
   const [teamCId, setTeamCId] = useState<number | null>(null);
   const [wildCardEnabled, setWildCardEnabled] = useState(false);
-  const [season, setSeason] = useState<string>("");
+  const [season, setSeason] = useState<string>("2026-27");
   const [period, setPeriod] = useState<string>("off-season");
+  const [notes, setNotes] = useState<string>("");
+  const [notesExpanded, setNotesExpanded] = useState(false);
   const [teamAAssets, setTeamAAssets] = useState<Asset[]>([]);
   const [teamBAssets, setTeamBAssets] = useState<Asset[]>([]);
   const [teamCAssets, setTeamCAssets] = useState<Asset[]>([]);
@@ -163,6 +171,7 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
         teamCId: wildCardEnabled ? teamCId : null,
         season,
         period,
+        notes: notes.trim() || null,
         assets: allAssets,
       });
 
@@ -188,6 +197,8 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
       setTeamAAssets([]);
       setTeamBAssets([]);
       setTeamCAssets([]);
+      setNotes("");
+      setNotesExpanded(false);
       onSaved();
       setSirenActive(true);
     } catch (err) {
@@ -196,7 +207,7 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
         : String(err);
       toast.error("Save failed: " + message);
     }
-  }, [teamAId, teamBId, teamCId, wildCardEnabled, season, period, teamAAssets, teamBAssets, teamCAssets, saveTrade, teams, onSaved]);
+  }, [teamAId, teamBId, teamCId, wildCardEnabled, season, period, notes, teamAAssets, teamBAssets, teamCAssets, saveTrade, teams, onSaved]);
 
   const [sirenActive, setSirenActive] = useState(false);
 
@@ -260,7 +271,7 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
             <SelectValue placeholder="Season..." />
           </SelectTrigger>
           <SelectContent>
-            {seasons.map((s) => (
+            {SIREN_SEASONS.map((s) => (
               <SelectItem key={s} value={s}>{s}</SelectItem>
             ))}
           </SelectContent>
@@ -376,6 +387,38 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
             recipientOptions={teamCId ? getRecipientOptions(teamCId) : []}
             onSetRecipient={(idx, rid) => setRecipient("C", idx, rid)}
           />
+        )}
+      </div>
+
+      {/* Notes / Contingencies */}
+      <div className="rounded-lg border border-border/60 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setNotesExpanded((prev) => !prev)}
+          className="flex items-center gap-2 w-full px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+        >
+          <Icon icon={notesExpanded ? "chevron-down" : "chevron-right"} className="h-3.5 w-3.5" />
+          <Icon icon="file-text" className="h-3.5 w-3.5" />
+          Add Notes / Contingencies
+          {notes.trim() && (
+            <Badge variant="secondary" className="text-[9px] px-1.5 py-0 ml-auto">
+              Has notes
+            </Badge>
+          )}
+        </button>
+        {notesExpanded && (
+          <div className="px-3 pb-3 pt-0">
+            <Textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Optional: conditional pick returns, performance clauses, exceptions, side deals…"
+              className="min-h-[80px] text-xs resize-y bg-secondary/30"
+              rows={3}
+            />
+            <p className="text-[10px] text-muted-foreground mt-1.5">
+              These notes are saved with the trade for reference. They don't affect valuations.
+            </p>
+          </div>
         )}
       </div>
 

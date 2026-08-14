@@ -61,6 +61,12 @@ const PlayerRow = memo(function PlayerRow({ player, onDraft, onToggleTag, isHigh
               {tags.map((t) => getTagEmoji(t)).join("")}
             </span>
           )}
+          {/* Write-in indicator */}
+          {player.is_write_in && (
+            <span className="inline-flex items-center rounded-sm bg-amber-600/25 border border-amber-600/40 px-1 py-0 text-[9px] font-medium text-amber-400 shrink-0" title="Write-in player">
+              ✏️ WI
+            </span>
+          )}
           {/* Value Alert — STEAL badge */}
           {boardPosition != null && player.adp_rank != null && boardPosition - player.adp_rank >= 10 && (
             <span className="inline-flex items-center gap-0.5 rounded-sm bg-amber-500/20 border border-amber-500/40 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-amber-400 animate-pulse shrink-0">

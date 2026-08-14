@@ -65,6 +65,11 @@ const PickRow = memo(function PickRow({
             <PositionBadge position={pick.player_position ?? "?"} className="text-[8px] px-1 py-0" />
             <span className="text-xs font-medium truncate">{pick.player_name}</span>
             <span className="text-[10px] text-muted-foreground">{pick.player_nfl_team}</span>
+            {pick.is_write_in && (
+              <span className="text-[9px] px-1 py-0 rounded bg-amber-600/30 text-amber-400 font-medium" title="Write-in player">
+                ✏️
+              </span>
+            )}
             {statusEmoji && <span className="text-[10px] ml-0.5">{statusEmoji}</span>}
           </div>
         ) : isCurrent ? (

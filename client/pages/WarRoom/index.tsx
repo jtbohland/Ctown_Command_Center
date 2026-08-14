@@ -149,6 +149,13 @@ export default function WarRoom() {
     }
   }, [initDb]);
 
+  const handleWriteInCreated = useCallback(
+    async () => {
+      await queryClient.invalidateQueries("GetPlayers");
+    },
+    [],
+  );
+
   const handleSwapKeeper = useCallback(
     async (oldPlayerId: number, newPlayerId: number, teamId: number) => {
       try {
@@ -342,6 +349,7 @@ export default function WarRoom() {
                 players={players}
                 onDraft={handleDraft}
                 onToggleTag={handleToggleTag}
+                onWriteInCreated={handleWriteInCreated}
               />
             </div>
 

@@ -87,6 +87,7 @@ export type Player = {
   drafted_round: number | null;
   drafted_pick: number | null;
   tags: string | null;
+  is_write_in?: boolean;
 };
 
 export type Team = {
@@ -114,6 +115,7 @@ export type DraftPick = {
   player_position: string | null;
   player_nfl_team: string | null;
   is_complete: boolean;
+  is_write_in?: boolean;
 };
 
 // Team Emojis — app-wide display

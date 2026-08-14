@@ -14,6 +14,7 @@ import PositionBadge from "@/components/draft/PositionBadge";
 import { getTeamEmoji } from "@/lib/draft-constants";
 import ctownReduxLogo from "@/public/logos/ctown-redux.png";
 import ActualsUploader from "@/components/settings/ActualsUploader";
+import HistoricalUploader from "@/components/settings/HistoricalUploader";
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -188,42 +189,23 @@ export default function SettingsPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               {/* Mode selector */}
-              <div className="flex gap-2">
-                <button
-                  className={`flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${uploadMode === "players" ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground hover:bg-accent"}`}
-                  onClick={() => setUploadMode("players")}
-                >
-                  <Icon icon="users" className="h-3.5 w-3.5 inline mr-1" />
-                  Players / Rankings
-                </button>
-                <button
-                  className={`flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${uploadMode === "dynasty" ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground hover:bg-accent"}`}
-                  onClick={() => setUploadMode("dynasty")}
-                >
-                  <Icon icon="crown" className="h-3.5 w-3.5 inline mr-1" />
-                  Dynasty Rankings
-                </button>
-                <button
-                  className={`flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${uploadMode === "keepers" ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground hover:bg-accent"}`}
-                  onClick={() => setUploadMode("keepers")}
-                >
-                  <Icon icon="shield" className="h-3.5 w-3.5 inline mr-1" />
-                  Keeper List
-                </button>
-                <button
-                  className={`flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${uploadMode === "rookie" ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground hover:bg-accent"}`}
-                  onClick={() => setUploadMode("rookie")}
-                >
-                  <Icon icon="baby" className="h-3.5 w-3.5 inline mr-1" />
-                  Rookie Rankings
-                </button>
-                <button
-                  className={`flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors ${uploadMode === "roster" ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground hover:bg-accent"}`}
-                  onClick={() => setUploadMode("roster")}
-                >
-                  <Icon icon="clipboard-list" className="h-3.5 w-3.5 inline mr-1" />
-                  Roster Upload
-                </button>
+              <div className="grid grid-cols-5 gap-2">
+                {([
+                  { key: "players" as const, icon: "users", label: "Players /\nRankings" },
+                  { key: "dynasty" as const, icon: "crown", label: "Dynasty\nRankings" },
+                  { key: "keepers" as const, icon: "shield", label: "Keeper\nList" },
+                  { key: "rookie" as const, icon: "baby", label: "Rookie\nRankings" },
+                  { key: "roster" as const, icon: "clipboard-list", label: "Roster\nUpload" },
+                ] as const).map((tab) => (
+                  <button
+                    key={tab.key}
+                    className={`flex flex-col items-center justify-center gap-1 rounded-md border px-2 py-2.5 text-[11px] font-medium leading-tight text-center transition-colors ${uploadMode === tab.key ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground hover:bg-accent"}`}
+                    onClick={() => setUploadMode(tab.key)}
+                  >
+                    <Icon icon={tab.icon} className="h-4 w-4" />
+                    <span className="whitespace-pre-line">{tab.label}</span>
+                  </button>
+                ))}
               </div>
 
               {/* Mode description */}
@@ -448,6 +430,9 @@ export default function SettingsPage() {
 
         {/* Actuals Uploader */}
         <ActualsUploader />
+
+        {/* Historical Draft Intelligence */}
+        <HistoricalUploader />
 
         {/* Player stats */}
         <Card>
