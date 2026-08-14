@@ -13,6 +13,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import PositionBadge from "@/components/draft/PositionBadge";
 import { getTeamEmoji } from "@/lib/draft-constants";
 import ctownReduxLogo from "@/public/logos/ctown-redux.png";
+import ActualsUploader from "@/components/settings/ActualsUploader";
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -444,6 +445,9 @@ export default function SettingsPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Actuals Uploader */}
+        <ActualsUploader />
 
         {/* Player stats */}
         <Card>
