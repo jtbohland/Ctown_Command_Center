@@ -183,10 +183,7 @@ export default function WriteInModal({
                 Creating…
               </>
             ) : (
-              <>
-                <Icon name="Plus" className="h-4 w-4 mr-1.5" />
-                Add Player
-              </>
+              "➕ Draft Player"
             )}
           </Button>
         </DialogFooter>

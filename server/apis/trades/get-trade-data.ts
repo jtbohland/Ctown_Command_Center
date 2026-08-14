@@ -54,6 +54,7 @@ const PlayerSchema = z.object({
   adp_rank: z.coerce.number().nullable(),
   positional_rank: z.coerce.number().nullable(),
   roster_team_id: z.coerce.number().nullable(),
+  is_keeper: z.boolean(),
 });
 
 const TeamSchema = z.object({
@@ -163,7 +164,7 @@ export default api({
     );
 
     const players = await ctx.integrations.apps_db.query(
-      `SELECT id, name, position, nfl_team, adp_rank, positional_rank, roster_team_id
+      `SELECT id, name, position, nfl_team, adp_rank, positional_rank, roster_team_id, is_keeper
       FROM ffwr_players 
       ORDER BY adp_rank ASC NULLS LAST
       LIMIT 650`,

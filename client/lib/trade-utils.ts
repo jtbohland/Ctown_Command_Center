@@ -209,6 +209,7 @@ export interface PlayerRow {
   adp_rank: number | null;
   positional_rank: number | null;
   roster_team_id: number | null;
+  is_keeper: boolean;
 }
 
 export interface DraftCapitalRow {

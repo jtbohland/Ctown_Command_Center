@@ -264,16 +264,25 @@ export default function DraftCapitalView({ draftCapital, teams, draftPicks2026 }
                   )}
                 </div>
 
-                {/* Own picks */}
-                {ownPicks.length > 0 && (
+                {/* Current Picks — everything the team holds right now */}
+                {picks.length > 0 && (
                   <div className="mb-1">
-                    <div className="text-[10px] text-muted-foreground font-medium mb-0.5">Own Picks</div>
+                    <div className="text-[10px] text-muted-foreground font-medium mb-0.5">Current Picks</div>
                     <div className="flex flex-wrap gap-1">
-                      {ownPicks.map((p) => (
-                        <Badge key={p.id} variant="secondary" className="text-[10px] px-1.5">
-                          {p.year} Rd{p.round}
-                        </Badge>
-                      ))}
+                      {picks.sort((a, b) => a.year - b.year || a.round - b.round).map((p) => {
+                        const isAcquired = p.original_team_id !== team.id;
+                        return (
+                          <Badge
+                            key={p.id}
+                            variant="secondary"
+                            className={`text-[10px] px-1.5 bg-zinc-800/90 border-zinc-700/50 ${
+                              isAcquired ? "text-emerald-400" : "text-white"
+                            }`}
+                          >
+                            {p.year} Rd{p.round}{isAcquired ? ` (from ${p.original_team_name})` : ""}
+                          </Badge>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

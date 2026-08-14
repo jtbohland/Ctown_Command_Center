@@ -150,8 +150,37 @@ export default function WarRoom() {
   }, [initDb]);
 
   const handleWriteInCreated = useCallback(
-    async () => {
+    async (player: { id: number; name: string; position: string; nfl_team: string; bye_week: number | null }) => {
       await queryClient.invalidateQueries("GetPlayers");
+      // Auto-open the draft dialog for the newly created write-in player
+      const asPlayer: Player = {
+        id: player.id,
+        name: player.name,
+        position: player.position,
+        nfl_team: player.nfl_team,
+        bye_week: player.bye_week,
+        adp_rank: null,
+        dynasty_rank: null,
+        positional_rank: null,
+        implied_team_points: null,
+        draft_rank: null,
+        draft_tier: null,
+        upside: null,
+        bust: null,
+        sos: null,
+        age: null,
+        dynasty_tier: null,
+        is_keeper: false,
+        keeper_team_id: null,
+        is_drafted: false,
+        drafted_team_id: null,
+        drafted_round: null,
+        drafted_pick: null,
+        tags: null,
+        is_write_in: true,
+      };
+      setSelectedPlayer(asPlayer);
+      setDialogOpen(true);
     },
     [],
   );
