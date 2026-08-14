@@ -28,6 +28,7 @@ export default api({
     teamCId: z.number().nullable(),
     season: z.string(),
     period: z.string(),
+    notes: z.string().nullable(),
     assets: z.array(AssetInputSchema),
   }),
 
@@ -39,7 +40,7 @@ export default api({
     picksMovedCount: z.number(),
   }),
 
-  async run(ctx, { teamAId, teamBId, teamCId, season, period, assets }) {
+  async run(ctx, { teamAId, teamBId, teamCId, season, period, notes, assets }) {
     const isThreeTeam = teamCId != null;
     const tradeType = isThreeTeam ? "three-team" : "two-team";
     const participantCount = isThreeTeam ? 3 : 2;
@@ -135,11 +136,11 @@ export default api({
     // Insert trade with three-team fields
     const InsertSchema = z.object({ id: z.coerce.number() });
     const [inserted] = await ctx.integrations.apps_db.query(
-      `INSERT INTO ffwr_trades (trade_number, season, trade_date, team_a_id, team_b_id, team_c_id, trade_type, participant_count, status, period)
-       VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, $7, 'completed', $8)
+      `INSERT INTO ffwr_trades (trade_number, season, trade_date, team_a_id, team_b_id, team_c_id, trade_type, participant_count, status, period, notes)
+       VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, $7, 'completed', $8, $9)
        RETURNING id`,
       InsertSchema,
-      [nextTradeNumber, season, teamAId, teamBId, teamCId, tradeType, participantCount, period],
+      [nextTradeNumber, season, teamAId, teamBId, teamCId, tradeType, participantCount, period, notes],
       { label: "Insert trade record" }
     );
 

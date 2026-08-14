@@ -5,23 +5,32 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Icon } from "@/components/ui/icon";
 import PlayerRow from "./PlayerRow";
+import WriteInModal from "./WriteInModal";
 import { TAG_OPTIONS, type Player, type TagKey } from "@/lib/draft-constants";
 
 type PlayerBoardProps = {
   players: Player[];
   onDraft: (playerId: number) => void;
   onToggleTag: (playerId: number, tag: TagKey) => void;
+  onWriteInCreated?: (player: {
+    id: number;
+    name: string;
+    position: string;
+    nfl_team: string;
+    bye_week: number | null;
+  }) => void;
 };
 
 const POSITIONS = ["ALL", "QB", "RB", "WR", "TE"] as const;
 
-export default function PlayerBoard({ players, onDraft, onToggleTag }: PlayerBoardProps) {
+export default function PlayerBoard({ players, onDraft, onToggleTag, onWriteInCreated }: PlayerBoardProps) {
   const [search, setSearch] = useState("");
   const [posFilter, setPosFilter] = useState<string>("ALL");
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<"adp" | "draft" | "dynasty" | "positional">("draft");
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [writeInOpen, setWriteInOpen] = useState(false);
 
   const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(e.target.value);
@@ -107,9 +116,18 @@ export default function PlayerBoard({ players, onDraft, onToggleTag }: PlayerBoa
           <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
             Player Board
           </h2>
-          <span className="text-xs text-muted-foreground">
-            {filteredPlayers.length} / {availablePlayers.length} available
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              {filteredPlayers.length} / {availablePlayers.length}
+            </span>
+            <Button
+              size="sm"
+              className="h-6 px-2.5 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white border-0 shadow-md shadow-amber-900/30"
+              onClick={() => setWriteInOpen(true)}
+            >
+              ✏️ Write In
+            </Button>
+          </div>
         </div>
 
         {/* Search */}
@@ -254,6 +272,15 @@ export default function PlayerBoard({ players, onDraft, onToggleTag }: PlayerBoa
           )}
         </div>
       </ScrollArea>
+
+      {/* Write-In Modal */}
+      <WriteInModal
+        open={writeInOpen}
+        onClose={() => setWriteInOpen(false)}
+        onPlayerCreated={(player) => {
+          onWriteInCreated?.(player);
+        }}
+      />
     </div>
   );
 }

@@ -44,6 +44,8 @@ import SeedRosters from './trades/seed-rosters.js';
 import GetRosterData from './trades/get-roster-data.js';
 import Redraft from './trades/redraft.js';
 import FixActualsSeasons from './trades/fix-actuals-seasons.js';
+import SeedHistoricalKeepersPicks from './draft/seed-historical-keepers-picks.js';
+import WriteInPlayer from './draft/write-in-player.js';
 
 
 const apis = {
@@ -93,6 +95,8 @@ const apis = {
   GetRosterData,
   Redraft,
   FixActualsSeasons,
+  SeedHistoricalKeepersPicks,
+  WriteInPlayer,
 } as const;
 
 export default apis;

@@ -30,6 +30,7 @@ const PlayerSchema = z.object({
   drafted_round: numOrNull,
   drafted_pick: numOrNull,
   tags: z.string().nullable(),
+  is_write_in: z.coerce.boolean(),
 });
 
 export default api({
@@ -47,6 +48,13 @@ export default api({
   }),
 
   async run(ctx) {
+    // Ensure the is_write_in column exists (idempotent, no-op after first run)
+    await ctx.integrations.apps_db.execute(
+      "ALTER TABLE ffwr_players ADD COLUMN IF NOT EXISTS is_write_in BOOLEAN DEFAULT FALSE",
+      undefined,
+      { label: "Ensure is_write_in column" },
+    );
+
     const players = await ctx.integrations.apps_db.query(
       `SELECT
         p.id, p.name, p.position, p.nfl_team,
@@ -55,6 +63,7 @@ export default api({
         p.age, p.dynasty_tier,
         CASE WHEN p.is_keeper THEN true ELSE false END as is_keeper, p.keeper_team_id,
         CASE WHEN p.is_drafted THEN true ELSE false END as is_drafted, p.drafted_team_id, p.drafted_round, p.drafted_pick,
+        COALESCE(p.is_write_in, false) as is_write_in,
         STRING_AGG(pt.tag, ',' ORDER BY pt.tag) as tags
       FROM ffwr_players p
       LEFT JOIN ffwr_player_tags pt ON pt.player_id = p.id

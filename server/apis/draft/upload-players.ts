@@ -1,4 +1,5 @@
 import { api, z, postgres, readableFileSchema } from "@superblocksteam/sdk-api";
+import { normalizePlayerName } from "../../lib/normalize-player-name.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
@@ -196,7 +197,7 @@ export default api({
         const position = posRaw.replace(/[0-9]/g, "").trim();
         if (!["QB", "RB", "WR", "TE"].includes(position)) continue;
 
-        const name = normalizeName(rawName);
+        const name = normalizePlayerName(rawName);
         if (!name) continue;
 
         const dynastyRank = rkIdx >= 0 ? parseFloat(cols[rkIdx]) || null : null;
@@ -259,7 +260,7 @@ export default api({
         const year = rYearIdx >= 0 ? parseInt(cols[rYearIdx]) || draftYear : draftYear;
         draftYear = year; // use detected year for all rows
 
-        rows.push({ year, pick, name: rawName.replace(/\./g, "").replace(/\s+/g, " ").trim(), pos: position, age });
+        rows.push({ year, pick, name: normalizePlayerName(rawName), pos: position, age });
       }
 
       if (rows.length === 0) {
@@ -344,13 +345,8 @@ export default api({
       return { name: cleaned, team: team || "FA", bye };
     }
 
-    // Normalize player name: strip periods, trailing "Jr"/"Sr"/"III" dots, collapse spaces
-    function normalizeName(raw: string): string {
-      return raw
-        .replace(/\./g, "")       // "A.J. Brown" → "AJ Brown", "Jr." → "Jr"
-        .replace(/\s+/g, " ")     // collapse multiple spaces
-        .trim();
-    }
+    // Use canonical shared normalizer
+    const normalizeName = normalizePlayerName;
 
     let imported = 0;
     let updated = 0;

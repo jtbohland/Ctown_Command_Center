@@ -141,7 +141,7 @@ export default function ArmChairDealer() {
         </TabsContent>
 
         <TabsContent value="siren" className="flex-1 overflow-auto px-5 py-4">
-          <SirenSale teams={teams} players={players} draftCapital={draftCapital} draftPicks2026={rosterData?.draftPicks2026 ?? []} onSaved={handleTradeSaved} seasons={seasons} />
+          <SirenSale teams={teams} players={players} draftCapital={draftCapital} draftPicks2026={rosterData?.draftPicks2026 ?? []} onSaved={handleTradeSaved} />
         </TabsContent>
 
         <TabsContent value="capital" className="flex-1 overflow-auto px-5 py-4">
