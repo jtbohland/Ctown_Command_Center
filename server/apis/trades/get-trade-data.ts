@@ -52,6 +52,8 @@ const PlayerSchema = z.object({
   position: z.string(),
   nfl_team: z.string(),
   adp_rank: z.coerce.number().nullable(),
+  positional_rank: z.coerce.number().nullable(),
+  roster_team_id: z.coerce.number().nullable(),
 });
 
 const TeamSchema = z.object({
@@ -161,11 +163,10 @@ export default api({
     );
 
     const players = await ctx.integrations.apps_db.query(
-      `SELECT id, name, position, nfl_team, adp_rank 
+      `SELECT id, name, position, nfl_team, adp_rank, positional_rank, roster_team_id
       FROM ffwr_players 
-      WHERE is_drafted = false OR is_keeper = true
       ORDER BY adp_rank ASC NULLS LAST
-      LIMIT 500`,
+      LIMIT 650`,
       PlayerSchema,
       undefined,
       { label: "Fetch available players" }

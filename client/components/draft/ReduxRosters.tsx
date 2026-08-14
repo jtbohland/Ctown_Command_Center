@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
+import { formatPlayerValueLabel } from "@/lib/player-values";
 
 interface Team {
   id: number;
@@ -32,6 +33,7 @@ interface RosterPlayer {
   position: string;
   nfl_team: string;
   adp_rank: number | null;
+  positional_rank: number | null;
   roster_team_id: number | null;
   is_keeper: boolean;
   team_name: string | null;
@@ -58,8 +60,8 @@ const PlayerRow = memo(function PlayerRow({ player }: { player: RosterPlayer }) 
       {player.nfl_team && (
         <span className="text-[10px] text-muted-foreground w-8 text-right">{player.nfl_team}</span>
       )}
-      <span className="text-[10px] text-muted-foreground w-10 text-right font-mono">
-        {player.adp_rank ? `#${player.adp_rank}` : "—"}
+      <span className="text-[10px] text-muted-foreground w-20 text-right font-mono">
+        {formatPlayerValueLabel(player.adp_rank, player.position, player.positional_rank)}
       </span>
     </div>
   );
@@ -179,7 +181,9 @@ export default function ReduxRosters({ teams }: Props) {
     }
   }, [redraft, refetch]);
 
-  const myTeamId = useMemo(() => teams.find((t) => t.is_my_team)?.id ?? null, [teams]);
+  const myTeam = useMemo(() => teams.find((t) => t.is_my_team), [teams]);
+  const myTeamId = myTeam?.id ?? null;
+  const isAdmin = !!myTeam;
 
   // Group players by team, apply search filter
   const teamRosters = useMemo(() => {
@@ -270,15 +274,17 @@ export default function ReduxRosters({ teams }: Props) {
             onChange={handleSearchChange}
             className="h-7 w-48 text-xs"
           />
-          <Button
-            variant="destructive"
-            size="sm"
-            className="h-7 text-xs gap-1"
-            disabled={redraftLoading || totalPlayers === 0}
-            onClick={() => setShowRedraftDialog(true)}
-          >
-            🔄 Redraft
-          </Button>
+          {isAdmin && (
+            <Button
+              variant="destructive"
+              size="sm"
+              className="h-7 text-xs gap-1"
+              disabled={redraftLoading || totalPlayers === 0}
+              onClick={() => setShowRedraftDialog(true)}
+            >
+              🔄 Redux Redraft
+            </Button>
+          )}
           <Dialog open={showRedraftDialog} onOpenChange={setShowRedraftDialog}>
             <DialogContent className="max-w-md">
               <DialogHeader>
@@ -298,7 +304,7 @@ export default function ReduxRosters({ teams }: Props) {
                   }}
                   disabled={redraftLoading}
                 >
-                  {redraftLoading ? "Clearing..." : "Yes, Redraft"}
+                  {redraftLoading ? "Clearing..." : "Yes, Redux Redraft"}
                 </Button>
               </DialogFooter>
             </DialogContent>

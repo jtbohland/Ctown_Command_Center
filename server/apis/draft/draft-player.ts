@@ -41,11 +41,11 @@ export default api({
       { label: "Assign player to pick" }
     );
 
-    // Mark the player as drafted
+    // Mark the player as drafted + assign to roster
     await ctx.integrations.apps_db.execute(
-      "UPDATE ffwr_players SET is_drafted = true, drafted_team_id = $1, drafted_round = $2, drafted_pick = $3 WHERE id = $4",
+      "UPDATE ffwr_players SET is_drafted = true, drafted_team_id = $1, drafted_round = $2, drafted_pick = $3, roster_team_id = $1 WHERE id = $4",
       [pick.team_id, pick.round, pick.pick_in_round, playerId],
-      { label: "Mark player as drafted" }
+      { label: "Mark player as drafted + roster sync" }
     );
 
     return { success: true };

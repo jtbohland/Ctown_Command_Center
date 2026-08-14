@@ -8,6 +8,7 @@ const RosterPlayerSchema = z.object({
   position: z.string(),
   nfl_team: z.string(),
   adp_rank: z.coerce.number().nullable(),
+  positional_rank: z.coerce.number().nullable(),
   roster_team_id: z.coerce.number().nullable(),
   is_keeper: z.coerce.boolean(),
   team_name: z.string().nullable(),
@@ -60,7 +61,7 @@ export default api({
       // Fetch all players with roster assignments
       rosterPlayers = await ctx.integrations.apps_db.query(
         `SELECT p.id, p.name, p.position, p.nfl_team, p.adp_rank,
-                p.roster_team_id, p.is_keeper,
+                p.positional_rank, p.roster_team_id, p.is_keeper,
                 t.team_name, t.manager_name
          FROM ffwr_players p
          LEFT JOIN ffwr_teams t ON t.id = p.roster_team_id

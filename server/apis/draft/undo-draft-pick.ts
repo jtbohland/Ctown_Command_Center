@@ -31,11 +31,11 @@ export default api({
 
     const playerId = picks[0].player_id;
     if (playerId) {
-      // Un-draft the player
+      // Un-draft the player + remove from roster
       await ctx.integrations.apps_db.execute(
-        "UPDATE ffwr_players SET is_drafted = false, drafted_team_id = NULL, drafted_round = NULL, drafted_pick = NULL WHERE id = $1",
+        "UPDATE ffwr_players SET is_drafted = false, drafted_team_id = NULL, drafted_round = NULL, drafted_pick = NULL, roster_team_id = NULL WHERE id = $1",
         [playerId],
-        { label: "Un-draft player" }
+        { label: "Un-draft player + clear roster" }
       );
     }
 

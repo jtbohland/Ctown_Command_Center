@@ -15,15 +15,17 @@ import {
   type TeamValuationResult,
 } from "@/lib/trade-utils";
 import { type TradeModifiers, DEFAULT_MODIFIERS } from "@/lib/trade-modifiers";
+import { formatDropdownLabel } from "@/lib/player-values";
 
 import TradeResults from "./TradeResults";
 import ThreeTeamDealResults from "./ThreeTeamDealResults";
 import ModelCustomizer from "./ModelCustomizer";
 import FormulaDeepDive from "./FormulaDeepDive";
 
-type Player = { id: number; name: string; position: string; nfl_team: string; adp_rank: number | null };
+type Player = { id: number; name: string; position: string; nfl_team: string; adp_rank: number | null; positional_rank?: number | null; roster_team_id?: number | null };
 type Team = { id: number; team_name: string; manager_name: string; color: string };
 type DraftCapitalRow = { id: number; year: number; round: number; original_team_id: number; current_team_id: number; original_team_name: string; current_team_name: string };
+type DraftPick2026 = { round: number; pick_in_round: number; overall_pick: number; team_id: number; team_name: string; manager_name: string; player_id: number | null; is_complete: boolean };
 
 type Asset = {
   type: "player" | "pick";
@@ -41,9 +43,10 @@ interface Props {
   players: Player[];
   teams: Team[];
   draftCapital: DraftCapitalRow[];
+  draftPicks2026: DraftPick2026[];
 }
 
-export default function TradeBuilder({ players, teams, draftCapital }: Props) {
+export default function TradeBuilder({ players, teams, draftCapital, draftPicks2026 }: Props) {
   const [teamAId, setTeamAId] = useState<number | null>(null);
   const [teamBId, setTeamBId] = useState<number | null>(null);
   const [teamCId, setTeamCId] = useState<number | null>(null);
@@ -61,6 +64,12 @@ export default function TradeBuilder({ players, teams, draftCapital }: Props) {
   const getTeamPicks = useCallback(
     (teamId: number) => draftCapital.filter((dc) => dc.current_team_id === teamId),
     [draftCapital]
+  );
+
+  // Get 2026 picks for a specific team (exact picks from draft board)
+  const getTeam2026Picks = useCallback(
+    (teamId: number) => draftPicks2026.filter((dp) => dp.team_id === teamId && !dp.is_complete),
+    [draftPicks2026]
   );
 
   const handleAddPlayer = useCallback(
@@ -82,12 +91,16 @@ export default function TradeBuilder({ players, teams, draftCapital }: Props) {
 
   const handleAddPick = useCallback(
     (side: "A" | "B" | "C", pickKey: string) => {
-      const [yearStr, roundStr] = pickKey.split("-");
+      const parts = pickKey.split("-");
+      const yearStr = parts[0];
+      const roundStr = parts[1];
+      // 2026 picks have 3 parts: year-round-overallPick
+      const overallPick = parts.length >= 3 ? Number(parts[2]) : null;
       const asset: Asset = {
         type: "pick",
         pickYear: Number(yearStr),
         pickRound: Number(roundStr),
-        pickNumber: null,
+        pickNumber: overallPick,
       };
       if (side === "A") setTeamAGives((prev) => [...prev, asset]);
       else if (side === "B") setTeamBGives((prev) => [...prev, asset]);
@@ -364,7 +377,9 @@ export default function TradeBuilder({ players, teams, draftCapital }: Props) {
           label={`${getTeamEmoji(teamAName)} ${teamAName} Sends`}
           assets={teamAGives}
           players={players}
+          teamId={teamAId}
           picks={teamAId ? getTeamPicks(teamAId) : []}
+          picks2026={teamAId ? getTeam2026Picks(teamAId) : []}
           onAddPlayer={(id) => handleAddPlayer("A", id)}
           onAddPick={(key) => handleAddPick("A", key)}
           onRemove={(idx) => handleRemoveAsset("A", idx)}
@@ -380,7 +395,9 @@ export default function TradeBuilder({ players, teams, draftCapital }: Props) {
           label={`${getTeamEmoji(teamBName)} ${teamBName} Sends`}
           assets={teamBGives}
           players={players}
+          teamId={teamBId}
           picks={teamBId ? getTeamPicks(teamBId) : []}
+          picks2026={teamBId ? getTeam2026Picks(teamBId) : []}
           onAddPlayer={(id) => handleAddPlayer("B", id)}
           onAddPick={(key) => handleAddPick("B", key)}
           onRemove={(idx) => handleRemoveAsset("B", idx)}
@@ -397,7 +414,9 @@ export default function TradeBuilder({ players, teams, draftCapital }: Props) {
             label={`${getTeamEmoji(teamCName)} ${teamCName} Sends`}
             assets={teamCGives}
             players={players}
+            teamId={teamCId}
             picks={teamCId ? getTeamPicks(teamCId) : []}
+            picks2026={teamCId ? getTeam2026Picks(teamCId) : []}
             onAddPlayer={(id) => handleAddPlayer("C", id)}
             onAddPick={(key) => handleAddPick("C", key)}
             onRemove={(idx) => handleRemoveAsset("C", idx)}
@@ -526,7 +545,9 @@ interface SidePanelProps {
   label: string;
   assets: Asset[];
   players: Player[];
-  picks: { year: number; round: number; original_team_name: string }[];
+  teamId: number | null;
+  picks: DraftCapitalRow[];
+  picks2026: DraftPick2026[];
   onAddPlayer: (playerId: string) => void;
   onAddPick: (pickKey: string) => void;
   onRemove: (index: number) => void;
@@ -543,7 +564,9 @@ function TradeSidePanel({
   label,
   assets,
   players,
+  teamId,
   picks,
+  picks2026,
   onAddPlayer,
   onAddPick,
   onRemove,
@@ -554,6 +577,13 @@ function TradeSidePanel({
   sideLabels,
   onSetRecipient,
 }: SidePanelProps) {
+  const isLocked = !teamId;
+
+  // Filter players to selected team's roster
+  const rosterFilteredPlayers = useMemo(() => {
+    if (!teamId) return [];
+    return players.filter((p) => p.roster_team_id === teamId);
+  }, [players, teamId]);
   return (
     <div
       className={`rounded-xl border-2 ${borderClass} bg-gradient-to-b ${gradientClass} p-4 space-y-3`}
@@ -585,7 +615,9 @@ function TradeSidePanel({
             <span className="flex-1 truncate font-medium min-w-0">
               {asset.type === "player"
                 ? asset.playerName
-                : `${asset.pickYear} Rd ${asset.pickRound}`}
+                : asset.pickNumber
+                  ? `${asset.pickYear} Rd ${asset.pickRound} (#${asset.pickNumber})`
+                  : `${asset.pickYear} Rd ${asset.pickRound}`}
             </span>
             {/* Recipient selector for 3-team mode */}
             {showRecipient && sideLabels && onSetRecipient && (
@@ -617,42 +649,46 @@ function TradeSidePanel({
 
       {/* Add dropdowns */}
       <div className="space-y-2">
-        <Select onValueChange={onAddPlayer} value="">
+        <Select onValueChange={onAddPlayer} value="" disabled={isLocked}>
           <SelectTrigger className="h-8 text-xs bg-background/50">
-            <SelectValue placeholder="➕ Add player..." />
+            <SelectValue placeholder={isLocked ? "Select a team first" : "➕ Add player..."} />
           </SelectTrigger>
           <SelectContent>
-            {players.slice(0, 150).map((p) => (
+            {rosterFilteredPlayers.map((p) => (
               <SelectItem key={p.id} value={p.id.toString()}>
-                <span className="font-medium">{p.name}</span>
-                <span className="text-muted-foreground ml-1">({p.position})</span>
-                {p.adp_rank ? <span className="text-muted-foreground ml-1">ADP {p.adp_rank}</span> : null}
+                {formatDropdownLabel(p.name, p.position, p.adp_rank, p.positional_rank)}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
 
-        <Select onValueChange={onAddPick} value="">
+        <Select onValueChange={onAddPick} value="" disabled={isLocked}>
           <SelectTrigger className="h-8 text-xs bg-background/50">
-            <SelectValue placeholder="➕ Add draft pick..." />
+            <SelectValue placeholder={isLocked ? "Select a team first" : "➕ Add draft pick..."} />
           </SelectTrigger>
           <SelectContent>
-            {picks.length > 0 && (
+            {/* 2026 exact picks from draft board */}
+            {picks2026.length > 0 && (
               <>
-                {picks.map((p, i) => (
-                  <SelectItem key={`own-${i}`} value={`${p.year}-${p.round}`}>
-                    🎯 {p.year} Rd {p.round} (from {p.original_team_name.split(" ")[0]})
+                {picks2026.map((dp) => (
+                  <SelectItem key={`2026-${dp.overall_pick}`} value={`2026-${dp.round}-${dp.overall_pick}`}>
+                    🎯 2026 Rd {dp.round} Pick {dp.pick_in_round} (#{dp.overall_pick} overall)
                   </SelectItem>
                 ))}
               </>
             )}
-            {[2026, 2027, 2028].map((year) =>
-              [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((round) => (
-                <SelectItem key={`gen-${year}-${round}`} value={`${year}-${round}`}>
-                  {year} Round {round}
-                </SelectItem>
-              ))
-            )}
+            {/* 2027/2028 picks from draft capital — only show "from" on acquired picks */}
+            {picks
+              .filter((dc) => dc.year >= 2027)
+              .sort((a, b) => a.year - b.year || a.round - b.round)
+              .map((dc) => {
+                const isAcquired = dc.original_team_id !== dc.current_team_id;
+                return (
+                  <SelectItem key={`dc-${dc.id}`} value={`${dc.year}-${dc.round}`}>
+                    {isAcquired ? "🎯 " : ""}{dc.year} Rd {dc.round}{isAcquired ? ` (from ${dc.original_team_name.split(" ")[0]})` : ""}
+                  </SelectItem>
+                );
+              })}
           </SelectContent>
         </Select>
       </div>

@@ -22,6 +22,12 @@ export default api({
   }),
 
   async run(ctx) {
+    // Only the commissioner (JT) can execute redraft
+    const ADMIN_EMAIL = "jt.bohland@amplitude.com";
+    if (ctx.user?.email !== ADMIN_EMAIL) {
+      throw new Error("Only the commissioner can perform a Redux Redraft.");
+    }
+
     // Check if roster_team_id column exists (it gets created by SeedRosters)
     const [{ exists: colExists }] = await ctx.integrations.apps_db.query(
       `SELECT EXISTS (

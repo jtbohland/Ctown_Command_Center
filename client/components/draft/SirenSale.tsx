@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Icon } from "@/components/ui/icon";
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
 import type { TeamRow, PlayerRow, DraftCapitalRow } from "@/lib/trade-utils";
+import { formatDropdownLabel } from "@/lib/player-values";
 
 interface Asset {
   type: "player" | "pick";
@@ -21,15 +22,18 @@ interface Asset {
   recipientTeamId: number | null;
 }
 
+type DraftPick2026 = { round: number; pick_in_round: number; overall_pick: number; team_id: number; team_name: string; manager_name: string; player_id: number | null; is_complete: boolean };
+
 interface Props {
   teams: TeamRow[];
   players: PlayerRow[];
   draftCapital: DraftCapitalRow[];
+  draftPicks2026: DraftPick2026[];
   onSaved: () => void;
   seasons: string[];
 }
 
-export default function SirenSale({ teams, players, draftCapital, onSaved, seasons }: Props) {
+export default function SirenSale({ teams, players, draftCapital, draftPicks2026, onSaved, seasons }: Props) {
   const [teamAId, setTeamAId] = useState<number | null>(null);
   const [teamBId, setTeamBId] = useState<number | null>(null);
   const [teamCId, setTeamCId] = useState<number | null>(null);
@@ -85,14 +89,15 @@ export default function SirenSale({ teams, players, draftCapital, onSaved, seaso
           recipientTeamId: null,
         };
       } else {
-        const [yearStr, roundStr] = value.split("-");
+        const parts = value.split("-");
+        const overallPick = parts.length >= 3 ? Number(parts[2]) : null;
         asset = {
           type: "pick",
           playerName: null,
           playerPosition: null,
-          pickYear: Number(yearStr),
-          pickRound: Number(roundStr),
-          pickNumber: null,
+          pickYear: Number(parts[0]),
+          pickRound: Number(parts[1]),
+          pickNumber: overallPick,
           fromTeamId: teamId,
           recipientTeamId: null,
         };
@@ -329,6 +334,9 @@ export default function SirenSale({ teams, players, draftCapital, onSaved, seaso
           label={teamA ? `${getTeamEmoji(teamA.team_name)} ${teamA.team_name} sends` : "Side A sends"}
           assets={teamAAssets}
           players={players}
+          teamId={teamAId}
+          draftCapital={draftCapital}
+          draftPicks2026={draftPicks2026}
           onAddPlayer={(id) => addAsset("A", "player", id)}
           onAddPick={(key) => addAsset("A", "pick", key)}
           onRemove={(idx) => removeAsset("A", idx)}
@@ -341,6 +349,9 @@ export default function SirenSale({ teams, players, draftCapital, onSaved, seaso
           label={teamB ? `${getTeamEmoji(teamB.team_name)} ${teamB.team_name} sends` : "Side B sends"}
           assets={teamBAssets}
           players={players}
+          teamId={teamBId}
+          draftCapital={draftCapital}
+          draftPicks2026={draftPicks2026}
           onAddPlayer={(id) => addAsset("B", "player", id)}
           onAddPick={(key) => addAsset("B", "pick", key)}
           onRemove={(idx) => removeAsset("B", idx)}
@@ -354,6 +365,9 @@ export default function SirenSale({ teams, players, draftCapital, onSaved, seaso
             label={teamC ? `${getTeamEmoji(teamC.team_name)} ${teamC.team_name} sends` : "Wild Card sends"}
             assets={teamCAssets}
             players={players}
+            teamId={teamCId}
+            draftCapital={draftCapital}
+            draftPicks2026={draftPicks2026}
             onAddPlayer={(id) => addAsset("C", "player", id)}
             onAddPick={(key) => addAsset("C", "pick", key)}
             onRemove={(idx) => removeAsset("C", idx)}
@@ -415,6 +429,9 @@ function AssetPanel({
   label,
   assets,
   players,
+  teamId,
+  draftCapital,
+  draftPicks2026,
   onAddPlayer,
   onAddPick,
   onRemove,
@@ -426,6 +443,9 @@ function AssetPanel({
   label: string;
   assets: Asset[];
   players: PlayerRow[];
+  teamId: number | null;
+  draftCapital: DraftCapitalRow[];
+  draftPicks2026: DraftPick2026[];
   onAddPlayer: (id: string) => void;
   onAddPick: (key: string) => void;
   onRemove: (idx: number) => void;
@@ -434,6 +454,27 @@ function AssetPanel({
   recipientOptions: { id: number; label: string }[];
   onSetRecipient: (idx: number, recipientTeamId: number) => void;
 }) {
+  const isLocked = !teamId;
+
+  // Filter players to only those on the selected team's roster
+  const rosterFilteredPlayers = useMemo(() => {
+    if (!teamId) return [];
+    return players.filter((p) => p.roster_team_id === teamId);
+  }, [players, teamId]);
+
+  // 2026 exact picks for this team (undrafted only)
+  const team2026Picks = useMemo(() => {
+    if (!teamId) return [];
+    return draftPicks2026.filter((dp) => dp.team_id === teamId && !dp.is_complete);
+  }, [draftPicks2026, teamId]);
+
+  // 2027/2028 picks from draft capital for this team
+  const teamFuturePicks = useMemo(() => {
+    if (!teamId) return [];
+    return draftCapital
+      .filter((dc) => dc.current_team_id === teamId && dc.year >= 2027)
+      .sort((a, b) => a.year - b.year || a.round - b.round);
+  }, [draftCapital, teamId]);
   return (
     <div className="rounded-lg border border-border/60 p-3 space-y-2">
       <h4 className="text-xs font-bold">{label}</h4>
@@ -453,7 +494,7 @@ function AssetPanel({
             ) : (
               <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0 bg-amber-500/10 border-amber-500/30 text-amber-400">📋</Badge>
             )}
-            <span className="flex-1 truncate">{a.type === "player" ? a.playerName : `${a.pickYear} Rd ${a.pickRound}`}</span>
+            <span className="flex-1 truncate">{a.type === "player" ? a.playerName : a.pickNumber ? `${a.pickYear} Rd ${a.pickRound} (#${a.pickNumber})` : `${a.pickYear} Rd ${a.pickRound}`}</span>
 
             {/* Recipient dropdown for 3-team mode */}
             {showRecipient && (
@@ -481,31 +522,43 @@ function AssetPanel({
         ))}
       </div>
 
-      <Select onValueChange={onAddPlayer} value="" disabled={disabled}>
+      <Select onValueChange={onAddPlayer} value="" disabled={isLocked}>
         <SelectTrigger className="h-7 text-xs">
-          <SelectValue placeholder="➕ Add player..." />
+          <SelectValue placeholder={isLocked ? "Select a team first" : "➕ Add player..."} />
         </SelectTrigger>
         <SelectContent>
-          {players.slice(0, 150).map((p) => (
+          {rosterFilteredPlayers.map((p) => (
             <SelectItem key={p.id} value={p.id.toString()}>
-              {p.name} ({p.position})
+              {formatDropdownLabel(p.name, p.position, p.adp_rank, p.positional_rank)}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
 
-      <Select onValueChange={onAddPick} value="" disabled={disabled}>
+      <Select onValueChange={onAddPick} value="" disabled={isLocked}>
         <SelectTrigger className="h-7 text-xs">
-          <SelectValue placeholder="➕ Add draft pick..." />
+          <SelectValue placeholder={isLocked ? "Select a team first" : "➕ Add draft pick..."} />
         </SelectTrigger>
         <SelectContent>
-          {[2026, 2027, 2028].map((year) =>
-            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((round) => (
-              <SelectItem key={`${year}-${round}`} value={`${year}-${round}`}>
-                {year} Round {round}
-              </SelectItem>
-            ))
+          {/* 2026 exact picks from draft board */}
+          {team2026Picks.length > 0 && (
+            <>
+              {team2026Picks.map((dp) => (
+                <SelectItem key={`2026-${dp.overall_pick}`} value={`2026-${dp.round}-${dp.overall_pick}`}>
+                  🎯 2026 Rd {dp.round} Pick {dp.pick_in_round} (#{dp.overall_pick} overall)
+                </SelectItem>
+              ))}
+            </>
           )}
+          {/* 2027/2028 picks from draft capital — "from" tag only on acquired picks */}
+          {teamFuturePicks.map((dc) => {
+            const isAcquired = dc.original_team_id !== dc.current_team_id;
+            return (
+              <SelectItem key={`dc-${dc.id}`} value={`${dc.year}-${dc.round}`}>
+                {isAcquired ? "🎯 " : ""}{dc.year} Rd {dc.round}{isAcquired ? ` (from ${dc.original_team_name.split(" ")[0]})` : ""}
+              </SelectItem>
+            );
+          })}
         </SelectContent>
       </Select>
     </div>
