@@ -3,7 +3,7 @@ import SirenCelebration from "./SirenCelebration";
 import { useApi } from "@/hooks/useApi";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Icon } from "@/components/ui/icon";
 import { Textarea } from "@/components/ui/textarea";
@@ -348,6 +348,7 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
           teamId={teamAId}
           draftCapital={draftCapital}
           draftPicks2026={draftPicks2026}
+          teams={teams}
           onAddPlayer={(id) => addAsset("A", "player", id)}
           onAddPick={(key) => addAsset("A", "pick", key)}
           onRemove={(idx) => removeAsset("A", idx)}
@@ -363,6 +364,7 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
           teamId={teamBId}
           draftCapital={draftCapital}
           draftPicks2026={draftPicks2026}
+          teams={teams}
           onAddPlayer={(id) => addAsset("B", "player", id)}
           onAddPick={(key) => addAsset("B", "pick", key)}
           onRemove={(idx) => removeAsset("B", idx)}
@@ -379,6 +381,7 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
             teamId={teamCId}
             draftCapital={draftCapital}
             draftPicks2026={draftPicks2026}
+            teams={teams}
             onAddPlayer={(id) => addAsset("C", "player", id)}
             onAddPick={(key) => addAsset("C", "pick", key)}
             onRemove={(idx) => removeAsset("C", idx)}
@@ -475,6 +478,7 @@ function AssetPanel({
   teamId,
   draftCapital,
   draftPicks2026,
+  teams,
   onAddPlayer,
   onAddPick,
   onRemove,
@@ -489,6 +493,7 @@ function AssetPanel({
   teamId: number | null;
   draftCapital: DraftCapitalRow[];
   draftPicks2026: DraftPick2026[];
+  teams: TeamRow[];
   onAddPlayer: (id: string) => void;
   onAddPick: (key: string) => void;
   onRemove: (idx: number) => void;
@@ -499,10 +504,17 @@ function AssetPanel({
 }) {
   const isLocked = !teamId;
 
-  // Filter players to only those on the selected team's roster
+  // Filter players to those on the selected team's roster
   const rosterFilteredPlayers = useMemo(() => {
     if (!teamId) return [];
     return players.filter((p) => p.roster_team_id === teamId);
+  }, [players, teamId]);
+
+  // Available pool: all non-keeper players NOT on ANY roster, sorted by ADP
+  const availablePoolPlayers = useMemo(() => {
+    if (!teamId) return [];
+    return players.filter((p) => !p.is_keeper && p.roster_team_id == null)
+      .sort((a, b) => (a.adp_rank ?? 9999) - (b.adp_rank ?? 9999));
   }, [players, teamId]);
 
   // 2026 exact picks for this team (undrafted only)
@@ -569,12 +581,33 @@ function AssetPanel({
         <SelectTrigger className="h-7 text-xs">
           <SelectValue placeholder={isLocked ? "Select a team first" : "➕ Add player..."} />
         </SelectTrigger>
-        <SelectContent>
-          {rosterFilteredPlayers.map((p) => (
-            <SelectItem key={p.id} value={p.id.toString()}>
-              {formatDropdownLabel(p.name, p.position, p.adp_rank, p.positional_rank)}
-            </SelectItem>
-          ))}
+        <SelectContent className="max-h-72">
+          {/* Current Roster — highlighted */}
+          {rosterFilteredPlayers.length > 0 && (
+            <SelectGroup>
+              <SelectLabel className="text-[10px] font-bold text-emerald-400 tracking-wider">🏠 ON ROSTER</SelectLabel>
+              {rosterFilteredPlayers.map((p) => (
+                <SelectItem key={p.id} value={p.id.toString()} className="border-l-2 border-emerald-500/60 pl-3">
+                  {formatDropdownLabel(p.name, p.position, p.adp_rank, p.positional_rank)}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          )}
+          {/* Separator between sections */}
+          {rosterFilteredPlayers.length > 0 && availablePoolPlayers.length > 0 && (
+            <SelectSeparator />
+          )}
+          {/* Available Pool — all non-keeper, unrostered players */}
+          {availablePoolPlayers.length > 0 && (
+            <SelectGroup>
+              <SelectLabel className="text-[10px] font-bold text-zinc-400 tracking-wider">📋 AVAILABLE PLAYERS</SelectLabel>
+              {availablePoolPlayers.map((p) => (
+                <SelectItem key={`pool-${p.id}`} value={p.id.toString()}>
+                  {formatDropdownLabel(p.name, p.position, p.adp_rank, p.positional_rank)}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          )}
         </SelectContent>
       </Select>
 
@@ -586,11 +619,16 @@ function AssetPanel({
           {/* 2026 exact picks from draft board */}
           {team2026Picks.length > 0 && (
             <>
-              {team2026Picks.map((dp) => (
-                <SelectItem key={`2026-${dp.overall_pick}`} value={`2026-${dp.round}-${dp.overall_pick}`}>
-                  🎯 2026 Rd {dp.round} Pick {dp.pick_in_round} (#{dp.overall_pick} overall)
-                </SelectItem>
-              ))}
+              {team2026Picks.map((dp) => {
+                const originalTeam = teams.find((t) => t.id === dp.pick_in_round);
+                const isAcquired = originalTeam && originalTeam.id !== dp.team_id;
+                return (
+                  <SelectItem key={`2026-${dp.overall_pick}`} value={`2026-${dp.round}-${dp.overall_pick}`}>
+                    🎯 2026 Rd {dp.round} Pick {dp.pick_in_round} (#{dp.overall_pick} overall)
+                    {isAcquired && <span className="text-amber-400 ml-1"> (from {originalTeam.team_name})</span>}
+                  </SelectItem>
+                );
+              })}
             </>
           )}
           {/* 2027/2028 picks from draft capital — "from" tag only on acquired picks */}
