@@ -44,6 +44,84 @@ export default api({
     const tradeType = isThreeTeam ? "three-team" : "two-team";
     const participantCount = isThreeTeam ? 3 : 2;
 
+    // ── Duplicate Detection ──────────────────────────────────────
+    // Build a fingerprint from sorted asset descriptions to catch duplicates
+    const assetFingerprint = assets
+      .map((a) => {
+        if (a.type === "player") return `p:${(a.playerName ?? "").toLowerCase()}`;
+        return `k:${a.pickYear}-${a.pickRound}`;
+      })
+      .sort()
+      .join("|");
+
+    // Check for existing trade with same teams (in any order) in same season
+    const DupeSchema = z.object({ trade_number: z.coerce.number(), trade_id: z.coerce.number() });
+    const teamIds = [teamAId, teamBId, ...(isThreeTeam ? [teamCId!] : [])].sort((a, b) => a - b);
+
+    const dupeQuery = isThreeTeam
+      ? `SELECT t.trade_number, t.id as trade_id
+         FROM ffwr_trades t
+         WHERE t.season = $1
+           AND ARRAY[LEAST(t.team_a_id, t.team_b_id, COALESCE(t.team_c_id, 0)), 
+                     GREATEST(LEAST(t.team_a_id, t.team_b_id), LEAST(GREATEST(t.team_a_id, t.team_b_id), COALESCE(t.team_c_id, 0))),
+                     GREATEST(t.team_a_id, t.team_b_id, COALESCE(t.team_c_id, 0))] 
+               = ARRAY[$2::int, $3::int, $4::int]
+         ORDER BY t.trade_number DESC
+         LIMIT 5`
+      : `SELECT t.trade_number, t.id as trade_id
+         FROM ffwr_trades t
+         WHERE t.season = $1
+           AND LEAST(t.team_a_id, t.team_b_id) = $2
+           AND GREATEST(t.team_a_id, t.team_b_id) = $3
+         ORDER BY t.trade_number DESC
+         LIMIT 5`;
+
+    const dupeParams = isThreeTeam
+      ? [season, teamIds[0], teamIds[1], teamIds[2]]
+      : [season, Math.min(teamAId, teamBId), Math.max(teamAId, teamBId)];
+
+    const potentialDupes = await ctx.integrations.apps_db.query(
+      dupeQuery,
+      DupeSchema,
+      dupeParams,
+      { label: "Check for duplicate trades" }
+    );
+
+    // For each potential dupe, check if the asset fingerprint matches
+    if (potentialDupes.length > 0) {
+      const AssetCheckSchema = z.object({
+        asset_type: z.string(),
+        player_name: z.string().nullable(),
+        pick_year: z.coerce.number().nullable(),
+        pick_round: z.coerce.number().nullable(),
+      });
+
+      for (const dupe of potentialDupes) {
+        const existingAssets = await ctx.integrations.apps_db.query(
+          `SELECT asset_type, player_name, pick_year, pick_round
+           FROM ffwr_trade_assets WHERE trade_id = $1 LIMIT 50`,
+          AssetCheckSchema,
+          [dupe.trade_id],
+          { label: `Check assets for trade #${dupe.trade_number}` }
+        );
+
+        const existingFingerprint = existingAssets
+          .map((a) => {
+            if (a.asset_type === "player") return `p:${(a.player_name ?? "").toLowerCase()}`;
+            return `k:${a.pick_year}-${a.pick_round}`;
+          })
+          .sort()
+          .join("|");
+
+        if (existingFingerprint === assetFingerprint) {
+          throw new Error(
+            `Duplicate trade detected! This matches existing Trade #${dupe.trade_number} in ${season}. ` +
+            `Same teams and same assets already recorded.`
+          );
+        }
+      }
+    }
+
     // Get next trade number for this season
     const MaxSchema = z.object({ max_num: z.coerce.number().nullable() });
     const [maxRow] = await ctx.integrations.apps_db.query(
@@ -111,11 +189,11 @@ export default api({
       }
     }
 
-    // ── Cascade 1: Roster updates (ffwr_players.drafted_team_id) ──
+    // ── Cascade 1: Roster updates (drafted_team_id + roster_team_id) ──
     for (const move of playerMoves) {
       await ctx.integrations.apps_db.execute(
         `UPDATE ffwr_players
-         SET drafted_team_id = $1
+         SET drafted_team_id = $1, roster_team_id = $1
          WHERE LOWER(name) = LOWER($2) AND is_drafted = true`,
         [move.toTeamId, move.playerName],
         { label: `Roster move: ${move.playerName} → team ${move.toTeamId}` }

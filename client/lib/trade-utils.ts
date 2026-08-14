@@ -207,6 +207,8 @@ export interface PlayerRow {
   position: string;
   nfl_team: string;
   adp_rank: number | null;
+  positional_rank: number | null;
+  roster_team_id: number | null;
 }
 
 export interface DraftCapitalRow {

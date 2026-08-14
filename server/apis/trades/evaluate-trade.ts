@@ -131,13 +131,33 @@ const SideResultSchema = z.object({
   unresolvedReasons: z.array(z.string()),
 });
 
+const DejaVuAssetSchema = z.object({
+  assetType: z.string(),
+  playerName: z.string().nullable(),
+  playerPosition: z.string().nullable(),
+  playerAdpAtTrade: z.coerce.number().nullable(),
+  pickYear: z.number().nullable(),
+  pickRound: z.number().nullable(),
+  pickNumber: z.number().nullable(),
+  fromTeamId: z.number(),
+  fromTeamName: z.string(),
+});
+
 const DejaVuSchema = z.object({
   tradeNumber: z.number(),
   season: z.string(),
+  tradeDate: z.string().nullable(),
   teamA: z.string(),
   teamB: z.string(),
   similarity: z.number(),
   summary: z.string(),
+  assets: z.array(DejaVuAssetSchema),
+  verdict: z.object({
+    label: z.string(),
+    emoji: z.string(),
+    severity: z.string(),
+  }).nullable(),
+  winnerName: z.string().nullable(),
 });
 
 const AdpRowSchema = z.object({
@@ -400,17 +420,22 @@ export default api({
     const dejaVu: z.infer<typeof DejaVuSchema>[] = [];
 
     if (playerNamesInTrade.length > 0) {
+      // Step 1: Find matching trade IDs, ordered by most recent first
       const TradeMatchSchema = z.object({
         trade_id: z.coerce.number(),
         trade_number: z.coerce.number(),
         season: z.string(),
+        trade_date: z.string().nullable(),
         team_a_name: z.string(),
         team_b_name: z.string(),
         player_name: z.string(),
       });
 
+      const dejaVuLimit = Math.max(1, Math.min(10, Math.round(mod.dejaVuSensitivity)));
+
       const matches = await ctx.integrations.apps_db.query(
         `SELECT DISTINCT ON (t.id) t.id as trade_id, t.trade_number, t.season,
+          t.trade_date::text as trade_date,
           ta_team.team_name as team_a_name, tb_team.team_name as team_b_name,
           assets.player_name
         FROM ffwr_trades t
@@ -418,22 +443,117 @@ export default api({
         JOIN ffwr_teams ta_team ON ta_team.id = t.team_a_id
         JOIN ffwr_teams tb_team ON tb_team.id = t.team_b_id
         WHERE LOWER(assets.player_name) = ANY($1::text[])
-        ORDER BY t.id, t.trade_number DESC
-        LIMIT ${Math.max(1, Math.min(10, Math.round(mod.dejaVuSensitivity)))}`,
+        ORDER BY t.id DESC
+        LIMIT ${dejaVuLimit}`,
         TradeMatchSchema,
         [playerNamesInTrade],
         { label: "Find Deal Déjà Vu matches" }
       );
 
-      for (const match of matches) {
-        dejaVu.push({
-          tradeNumber: match.trade_number,
-          season: match.season,
-          teamA: match.team_a_name,
-          teamB: match.team_b_name,
-          similarity: 0.8,
-          summary: `${match.player_name} was previously traded in ${match.season} (#${match.trade_number})`,
+      // Sort by trade_date DESC after DISTINCT ON
+      matches.sort((a, b) => {
+        if (a.trade_date && b.trade_date) return b.trade_date.localeCompare(a.trade_date);
+        if (a.trade_date) return -1;
+        if (b.trade_date) return 1;
+        return b.trade_id - a.trade_id;
+      });
+
+      if (matches.length > 0) {
+        // Step 2: Fetch all assets for matched trades
+        const tradeIds = matches.map((m) => m.trade_id);
+
+        const AssetRowSchema = z.object({
+          trade_id: z.coerce.number(),
+          asset_type: z.string(),
+          player_name: z.string().nullable(),
+          player_position: z.string().nullable(),
+          player_adp_at_trade: z.coerce.number().nullable(),
+          pick_year: z.coerce.number().nullable(),
+          pick_round: z.coerce.number().nullable(),
+          pick_number: z.coerce.number().nullable(),
+          from_team_id: z.coerce.number(),
+          from_team_name: z.string(),
         });
+
+        const allAssets = await ctx.integrations.apps_db.query(
+          `SELECT a.trade_id, a.asset_type, a.player_name, a.player_position,
+            a.player_adp_at_trade, a.pick_year, a.pick_round, a.pick_number,
+            a.from_team_id, ft.team_name as from_team_name
+          FROM ffwr_trade_assets a
+          JOIN ffwr_teams ft ON ft.id = a.from_team_id
+          WHERE a.trade_id = ANY($1::int[])
+          ORDER BY a.trade_id, a.id
+          LIMIT 200`,
+          AssetRowSchema,
+          [tradeIds],
+          { label: "Fetch Déjà Vu trade assets" }
+        );
+
+        // Group assets by trade_id
+        const assetsByTradeId = new Map<number, z.infer<typeof AssetRowSchema>[]>();
+        for (const asset of allAssets) {
+          if (!assetsByTradeId.has(asset.trade_id)) assetsByTradeId.set(asset.trade_id, []);
+          assetsByTradeId.get(asset.trade_id)!.push(asset);
+        }
+
+        for (const match of matches) {
+          const tradeAssets = assetsByTradeId.get(match.trade_id) ?? [];
+
+          // Compute a rough historical verdict from the trade's asset values
+          let historicalVerdict: { label: string; emoji: string; severity: string } | null = null;
+          let winnerName: string | null = null;
+
+          // Use the ADP values recorded at trade time to evaluate
+          const teamAAssetValues: number[] = [];
+          const teamBAssetValues: number[] = [];
+          for (const ta of tradeAssets) {
+            const val = ta.player_adp_at_trade
+              ? calcValue(ta.player_adp_at_trade, mod.valueCurve)
+              : ta.pick_year && ta.pick_round
+                ? calcValue(pickToExpectedAdp(ta.pick_round, ta.pick_year, ta.pick_number ?? undefined), mod.valueCurve)
+                : 0;
+            // Determine which side this asset came from
+            if (ta.from_team_name === match.team_a_name) {
+              teamAAssetValues.push(val);
+            } else {
+              teamBAssetValues.push(val);
+            }
+          }
+
+          const totalA = teamAAssetValues.reduce((s, v) => s + v, 0);
+          const totalB = teamBAssetValues.reduce((s, v) => s + v, 0);
+          const avg = (totalA + totalB) / 2;
+          if (avg > 0) {
+            const pct = ((totalB - totalA) / avg) * 100;
+            historicalVerdict = getVerdict(pct, mod.fairTolerance, mod.verdictScale);
+            if (Math.abs(pct) > mod.fairTolerance) {
+              winnerName = pct > 0 ? match.team_a_name : match.team_b_name;
+            }
+          }
+
+          dejaVu.push({
+            tradeNumber: match.trade_number,
+            season: match.season,
+            tradeDate: match.trade_date,
+            teamA: match.team_a_name,
+            teamB: match.team_b_name,
+            similarity: 0.8,
+            summary: `${match.player_name} was previously traded in ${match.season} (#${match.trade_number})`,
+            assets: tradeAssets.map((ta) => ({
+              assetType: ta.asset_type,
+              playerName: ta.player_name,
+              playerPosition: ta.player_position,
+              playerAdpAtTrade: ta.player_adp_at_trade,
+              pickYear: ta.pick_year,
+              pickRound: ta.pick_round,
+              pickNumber: ta.pick_number,
+              fromTeamId: ta.from_team_id,
+              fromTeamName: ta.from_team_name,
+            })),
+            verdict: historicalVerdict,
+            winnerName,
+          });
+        }
       }
     }
 

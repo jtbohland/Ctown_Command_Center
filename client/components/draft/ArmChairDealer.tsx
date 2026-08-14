@@ -129,7 +129,7 @@ export default function ArmChairDealer() {
         </div>
 
         <TabsContent value="builder" className="flex-1 overflow-auto px-5 py-4">
-          <TradeBuilder players={players} teams={teams} draftCapital={draftCapital} />
+          <TradeBuilder players={players} teams={teams} draftCapital={draftCapital} draftPicks2026={rosterData?.draftPicks2026 ?? []} />
         </TabsContent>
 
         <TabsContent value="history" className="flex-1 overflow-auto px-5 py-4">
@@ -141,7 +141,7 @@ export default function ArmChairDealer() {
         </TabsContent>
 
         <TabsContent value="siren" className="flex-1 overflow-auto px-5 py-4">
-          <SirenSale teams={teams} players={players} draftCapital={draftCapital} onSaved={handleTradeSaved} seasons={seasons} />
+          <SirenSale teams={teams} players={players} draftCapital={draftCapital} draftPicks2026={rosterData?.draftPicks2026 ?? []} onSaved={handleTradeSaved} seasons={seasons} />
         </TabsContent>
 
         <TabsContent value="capital" className="flex-1 overflow-auto px-5 py-4">
