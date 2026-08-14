@@ -43,6 +43,7 @@ import ComputeTradeActuals from './trades/compute-trade-actuals.js';
 import SeedRosters from './trades/seed-rosters.js';
 import GetRosterData from './trades/get-roster-data.js';
 import Redraft from './trades/redraft.js';
+import FixActualsSeasons from './trades/fix-actuals-seasons.js';
 
 
 const apis = {
@@ -91,6 +92,7 @@ const apis = {
   SeedRosters,
   GetRosterData,
   Redraft,
+  FixActualsSeasons,
 } as const;
 
 export default apis;

@@ -17,13 +17,12 @@ function parsePlayer(raw: string): { name: string; team: string } {
 }
 
 /**
- * Convert a year label like "2019" to our season format "2018-19".
- * The label represents the year the season ENDED (Super Bowl year).
+ * Convert a year label like "2025" to our season format "2025-26".
+ * The label represents the year the season STARTED (FantasyPros convention).
  */
 function yearToSeason(yearLabel: string): string {
-  const endYear = parseInt(yearLabel, 10);
-  const startYear = endYear - 1;
-  const endSuffix = String(endYear).slice(-2);
+  const startYear = parseInt(yearLabel, 10);
+  const endSuffix = String(startYear + 1).slice(-2);
   return `${startYear}-${endSuffix}`;
 }
 
