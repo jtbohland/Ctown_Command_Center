@@ -51,6 +51,7 @@ import SaveLeagueRecord from './settings/save-league-record.js';
 import GetLeagueRecords from './settings/get-league-records.js';
 import DownloadLeagueRecord from './settings/download-league-record.js';
 import BackfillTradeVerdicts from './trades/backfill-trade-verdicts.js';
+import ProvenanceReport from './trades/provenance-report.js';
 
 
 const apis = {
@@ -107,6 +108,7 @@ const apis = {
   GetLeagueRecords,
   DownloadLeagueRecord,
   BackfillTradeVerdicts,
+  ProvenanceReport,
 } as const;
 
 export default apis;
