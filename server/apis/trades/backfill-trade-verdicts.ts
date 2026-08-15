@@ -9,12 +9,27 @@ const POWER = 0.6;
 const KEEPERS_PER_TEAM = 4;
 const RIGHTS_VALUE_MULTIPLIER = 1.0; // exclusive keeper rights = 100% of underlying player
 
-// C-Town league size by draft year
+// C-Town league size by draft year (explicit for all configured years)
 const LEAGUE_SIZE_BY_YEAR: Record<number, number> = {
   2019: 10, 2020: 10, 2021: 10, 2022: 10, 2023: 10, 2024: 10,
-  2025: 11, 2026: 11, 2027: 11,
+  2025: 11, 2026: 11, 2027: 11, 2028: 11,
 };
 const DEFAULT_LEAGUE_SIZE = 11;
+
+// ─── Future-pick time discounts ───
+// Applied once: base_pick_value × discount.
+// years_ahead = pick_year − reference_draft_year (the trade's valuation year).
+const FUTURE_PICK_DISCOUNT: Record<number, number> = {
+  0: 1.00,  // same draft year
+  1: 0.80,  // one year ahead
+  2: 0.65,  // two years ahead
+};
+const DEFAULT_FUTURE_DISCOUNT = 0.50; // 3+ years ahead
+
+function getFuturePickDiscount(pickYear: number, referenceDraftYear: number): number {
+  const yearsAhead = Math.max(0, pickYear - referenceDraftYear);
+  return FUTURE_PICK_DISCOUNT[yearsAhead] ?? DEFAULT_FUTURE_DISCOUNT;
+}
 
 // ─── Position-specific unranked baselines ───
 // Used when a player has a resolved identity but no current-season ADP.
@@ -97,8 +112,8 @@ const NFL_WEEK1_TUESDAY: Record<string, string> = {
 const REGULAR_SEASON_WEEKS: Record<string, number> = {
   "2018-19": 17,
   "2019-20": 17,
-  "2020-21": 18,
-  "2021-22": 18,
+  "2020-21": 17, // 2020 NFL season: 16 games / 17 weeks (pre-expansion)
+  "2021-22": 18, // 2021 NFL season onward: 17 games / 18 weeks
   "2022-23": 18,
   "2023-24": 18,
   "2024-25": 18,
@@ -387,6 +402,10 @@ interface AssetDetail {
   fallbackBaseline: number | null;
   matchedAdpName: string | null;
   matchedAdpRank: number | null;
+  // Pick discount audit fields
+  futureDiscount: number | null;
+  valueBeforeDiscount: number | null;
+  yearsAhead: number | null;
 }
 
 // ─── Summary schemas for the report ───
@@ -397,6 +416,45 @@ const UnresolvedAssetEntry = z.object({
   playerName: z.string(),
   identityStatus: z.string(),
   adpStatus: z.string(),
+});
+
+const AssetDetailEntry = z.object({
+  tradeId: z.number(),
+  tradeNumber: z.number(),
+  season: z.string(),
+  tradeDate: z.string().nullable(),
+  assetId: z.number(),
+  playerName: z.string().nullable(),
+  assetType: z.string(),
+  fromTeamId: z.number(),
+  identityStatus: z.string(),
+  adpStatus: z.string(),
+  fallbackType: z.string(),
+  value: z.number(),
+  resolved: z.boolean(),
+  usedFallback: z.boolean(),
+  blended: z.boolean(),
+  confidence: z.string(),
+  isKeeperRights: z.boolean(),
+  underlyingPlayer: z.string().nullable(),
+  rightsAssumption: z.string().nullable(),
+  fallbackBaseline: z.number().nullable(),
+  matchedAdpName: z.string().nullable(),
+  matchedAdpRank: z.number().nullable(),
+  // Pick-specific fields
+  pickYear: z.number().nullable(),
+  pickRound: z.number().nullable(),
+  pickNumber: z.number().nullable(),
+  pickExpectedAdp: z.number().nullable(),
+  // Pick discount audit fields
+  futureDiscount: z.number().nullable(),
+  valueBeforeDiscount: z.number().nullable(),
+  yearsAhead: z.number().nullable(),
+  // Actuals detail
+  actualsPercentile: z.number().nullable(),
+  actualsWeight: z.number().nullable(),
+  seasonPhase: z.string().nullable(),
+  lastCompletedWeek: z.number().nullable(),
 });
 
 export default api({
@@ -427,6 +485,8 @@ export default api({
     uniqueUnresolvedNames: z.array(z.string()),
     tradesWithFallback: z.array(z.number()),
     tradesGenuinelyBlocked: z.array(z.number()),
+    // Per-asset detail for full audit report
+    assetDetails: z.array(AssetDetailEntry),
   }),
 
   async run(ctx, { dryRun, forceRecompute }) {
@@ -467,6 +527,7 @@ export default api({
         results: [],
         unresolvedAssets: [], uniqueUnresolvedNames: [],
         tradesWithFallback: [], tradesGenuinelyBlocked: [],
+        assetDetails: [],
       };
     }
 
@@ -601,6 +662,7 @@ export default api({
     let rightsValuedCount = 0;
     const tradesWithFallbackSet = new Set<number>();
     const tradesGenuinelyBlockedSet = new Set<number>();
+    const allAssetDetails: z.infer<typeof AssetDetailEntry>[] = [];
 
     for (const trade of trades) {
       const assets = assetsByTrade.get(trade.id) ?? [];
@@ -688,6 +750,9 @@ export default api({
             fallbackBaseline: null,
             matchedAdpName: null,
             matchedAdpRank: null,
+            futureDiscount: null,
+            valueBeforeDiscount: null,
+            yearsAhead: null,
           };
         }
 
@@ -817,6 +882,9 @@ export default api({
               fallbackBaseline,
               matchedAdpName,
               matchedAdpRank,
+              futureDiscount: null,
+              valueBeforeDiscount: null,
+              yearsAhead: null,
             };
           }
         }
@@ -839,6 +907,9 @@ export default api({
           fallbackBaseline,
           matchedAdpName,
           matchedAdpRank,
+          futureDiscount: null,
+          valueBeforeDiscount: null,
+          yearsAhead: null,
         };
       }
 
@@ -870,6 +941,9 @@ export default api({
         const year = asset.pick_year ?? draftYear;
         const round = asset.pick_round ?? 6;
         const pickNum = asset.pick_number ?? undefined;
+        const basePickValue = calcValue(pickToExpectedAdp(round, year, pickNum));
+        const discount = getFuturePickDiscount(year, draftYear);
+        const yearsAhead = Math.max(0, year - draftYear);
         return {
           assetId: asset.id,
           playerName: asset.player_name,
@@ -877,7 +951,7 @@ export default api({
           identityStatus: "resolved",
           adpStatus: "current_season_adp",
           fallbackType: "none" as FallbackType,
-          value: calcValue(pickToExpectedAdp(round, year, pickNum)),
+          value: basePickValue * discount,
           resolved: true,
           usedFallback: false,
           blended: false,
@@ -888,6 +962,9 @@ export default api({
           fallbackBaseline: null,
           matchedAdpName: null,
           matchedAdpRank: null,
+          futureDiscount: discount,
+          valueBeforeDiscount: basePickValue,
+          yearsAhead,
         };
       }
 
@@ -895,6 +972,51 @@ export default api({
       const assetDetails: AssetDetail[] = [];
       for (const asset of assets) {
         assetDetails.push(valueAsset(asset));
+      }
+
+      // ── Collect per-asset detail entries for audit report ──
+      for (const ad of assetDetails) {
+        const asset = assets.find(a => a.id === ad.assetId)!;
+        const actualsPercentileValue = actualsPercentiles && ad.playerName
+          ? actualsPercentiles.get(normalizeName(ad.playerName)) ?? null
+          : null;
+        allAssetDetails.push({
+          tradeId: trade.id,
+          tradeNumber: trade.trade_number,
+          season: trade.season,
+          tradeDate: trade.trade_date,
+          assetId: ad.assetId,
+          playerName: ad.playerName,
+          assetType: ad.assetType,
+          fromTeamId: asset.from_team_id,
+          identityStatus: ad.identityStatus,
+          adpStatus: ad.adpStatus,
+          fallbackType: ad.fallbackType,
+          value: Math.round(ad.value * 100) / 100,
+          resolved: ad.resolved,
+          usedFallback: ad.usedFallback,
+          blended: ad.blended,
+          confidence: ad.confidence,
+          isKeeperRights: ad.isKeeperRights,
+          underlyingPlayer: ad.underlyingPlayer,
+          rightsAssumption: ad.rightsAssumption,
+          fallbackBaseline: ad.fallbackBaseline,
+          matchedAdpName: ad.matchedAdpName,
+          matchedAdpRank: ad.matchedAdpRank,
+          pickYear: asset.pick_year,
+          pickRound: asset.pick_round,
+          pickNumber: asset.pick_number,
+          pickExpectedAdp: ad.assetType === "pick"
+            ? pickToExpectedAdp(asset.pick_round ?? 6, asset.pick_year ?? draftYear, asset.pick_number ?? undefined)
+            : null,
+          futureDiscount: ad.futureDiscount,
+          valueBeforeDiscount: ad.valueBeforeDiscount != null ? Math.round(ad.valueBeforeDiscount * 100) / 100 : null,
+          yearsAhead: ad.yearsAhead,
+          actualsPercentile: actualsPercentileValue,
+          actualsWeight: ad.blended ? phaseInfo.actualsWeight : null,
+          seasonPhase: phaseInfo.seasonPhase,
+          lastCompletedWeek: phaseInfo.lastCompletedWeek,
+        });
       }
 
       // Aggregate per-trade status fields
@@ -1197,6 +1319,7 @@ export default api({
       uniqueUnresolvedNames,
       tradesWithFallback: [...tradesWithFallbackSet],
       tradesGenuinelyBlocked: [...tradesGenuinelyBlockedSet],
+      assetDetails: allAssetDetails,
     };
   },
 });
