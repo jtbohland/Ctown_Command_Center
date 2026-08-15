@@ -94,7 +94,8 @@ const DraftOrderRow = memo(function DraftOrderRow({
 });
 
 export default function DraftCapitalView({ draftCapital, teams, draftPicks2026 }: Props) {
-  const [yearFilter, setYearFilter] = useState<string>("all");
+  // Default to most recent year (2026) instead of "all"
+  const [yearFilter, setYearFilter] = useState<string>("2026");
   const [trackerRound, setTrackerRound] = useState<number | "all">("all");
 
   const myTeamId = useMemo(() => teams.find((t) => t.is_my_team)?.id ?? null, [teams]);
@@ -111,7 +112,6 @@ export default function DraftCapitalView({ draftCapital, teams, draftPicks2026 }
   }, [draftCapital]);
 
   const filtered = useMemo(() => {
-    if (yearFilter === "all") return draftCapital;
     return draftCapital.filter((dc) => dc.year === Number(yearFilter));
   }, [draftCapital, yearFilter]);
 
@@ -139,7 +139,6 @@ export default function DraftCapitalView({ draftCapital, teams, draftPicks2026 }
 
   // For future years without data, generate virtual "full" capital
   const virtualCapital = useMemo(() => {
-    if (yearFilter === "all") return [];
     const yr = Number(yearFilter);
 
     // 2026 uses draft board data
@@ -188,7 +187,6 @@ export default function DraftCapitalView({ draftCapital, teams, draftPicks2026 }
 
   // Draft tracker: ordered picks for the selected year
   const trackerPicks = useMemo(() => {
-    if (yearFilter === "all") return [];
     const yr = Number(yearFilter);
     // Build pick order: round × team (by draft_position or team id)
     const sortedTeams = [...teams].sort((a, b) => a.id - b.id);
@@ -226,7 +224,6 @@ export default function DraftCapitalView({ draftCapital, teams, draftPicks2026 }
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Years</SelectItem>
             {years.map((y) => (
               <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
             ))}
@@ -234,7 +231,7 @@ export default function DraftCapitalView({ draftCapital, teams, draftPicks2026 }
         </Select>
       </div>
 
-      <div className={yearFilter !== "all" ? "grid grid-cols-[1fr_280px] gap-4" : ""}>
+      <div className="grid grid-cols-[1fr_280px] gap-4">
         {/* Team Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {byTeam.map(({ team, picks }) => {
@@ -271,15 +268,26 @@ export default function DraftCapitalView({ draftCapital, teams, draftPicks2026 }
                     <div className="flex flex-wrap gap-1">
                       {picks.sort((a, b) => a.year - b.year || a.round - b.round).map((p) => {
                         const isAcquired = p.original_team_id !== team.id;
+                        // For 2026 picks, show granular detail from draft board
+                        const is2026 = p.year === 2026;
+                        const draftBoardPick = is2026 && draftPicks2026
+                          ? draftPicks2026.find(
+                              (dp) => dp.round === p.round && dp.team_id === p.current_team_id
+                            )
+                          : null;
+                        const pickLabel = is2026 && draftBoardPick
+                          ? `Rd${p.round} Pick ${draftBoardPick.pick_in_round} (#${draftBoardPick.overall_pick})`
+                          : `${p.year} Rd${p.round}`;
                         return (
                           <Badge
                             key={p.id}
                             variant="secondary"
-                            className={`text-[10px] px-1.5 bg-zinc-800/90 border-zinc-700/50 ${
-                              isAcquired ? "text-emerald-400" : "text-white"
-                            }`}
+                            className="text-[10px] px-1.5 bg-zinc-800/90 border-zinc-700/50"
                           >
-                            {p.year} Rd{p.round}{isAcquired ? ` (from ${p.original_team_name})` : ""}
+                            <span className="text-white">{pickLabel}</span>
+                            {isAcquired && (
+                              <span className="text-amber-400 ml-0.5">(from {p.original_team_name})</span>
+                            )}
                           </Badge>
                         );
                       })}
@@ -324,8 +332,7 @@ export default function DraftCapitalView({ draftCapital, teams, draftPicks2026 }
         </div>
 
         {/* Draft Tracker (visible when a specific year is selected) */}
-        {yearFilter !== "all" && (
-          <div className="flex flex-col border border-border rounded-lg overflow-hidden bg-card/30">
+        <div className="flex flex-col border border-border rounded-lg overflow-hidden bg-card/30">
             {/* Tracker Header */}
             <div className="px-4 pt-4 pb-3 border-b border-border space-y-2">
               <div className="flex items-center justify-between">
@@ -374,8 +381,7 @@ export default function DraftCapitalView({ draftCapital, teams, draftPicks2026 }
                 ))}
               </div>
             </ScrollArea>
-          </div>
-        )}
+      </div>
       </div>
     </div>
   );

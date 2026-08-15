@@ -14,7 +14,7 @@ import PositionBadge from "@/components/draft/PositionBadge";
 import { getTeamEmoji } from "@/lib/draft-constants";
 import ctownReduxLogo from "@/public/logos/ctown-redux.png";
 import ActualsUploader from "@/components/settings/ActualsUploader";
-import HistoricalUploader from "@/components/settings/HistoricalUploader";
+import LeagueOfRecord from "@/components/settings/LeagueOfRecord";
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -431,8 +431,8 @@ export default function SettingsPage() {
         {/* Actuals Uploader */}
         <ActualsUploader />
 
-        {/* Historical Draft Intelligence */}
-        <HistoricalUploader />
+        {/* The League of Record — historical CSV archive */}
+        <LeagueOfRecord />
 
         {/* Player stats */}
         <Card>
