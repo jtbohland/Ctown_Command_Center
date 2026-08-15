@@ -48,51 +48,9 @@ function getKeeperOffset(year: number): number {
   return getLeagueSize(year) * KEEPERS_PER_TEAM;
 }
 
-// ─── Name Normalization ──────────────────────────────────────
-const NAME_CORRECTIONS: Record<string, string> = {
-  // Typos in trade asset data → correct ADP name (post-normalization, i.e. lowercase, no dots/suffixes)
-  "patrick maholmes": "patrick mahomes",
-  "patrick maholmes ii": "patrick mahomes",
-  "travis ettiene": "travis etienne",
-  "christian mccaffery": "christian mccaffrey",
-  "c mccaffery": "christian mccaffrey",
-  "cordarelle patterson": "cordarrelle patterson",
-  "devonta freemand": "devonta freeman",
-  "marlan mack": "marlon mack",
-  "tetaroia mcmillan": "tetairoa mcmillan",
-  "treyveon henderson": "treveyon henderson",
-  "sterling shepherd": "sterling shepard",
-  "isiah davis": "isaiah davis",
-  // Apostrophe / special char variants
-  "deandre swift": "dandre swift",       // ADP has D'Andre → normalized "dandre swift"
-  // Abbreviated first names → full names
-  "d achane": "devon achane",             // De'Von Achane → normalized "devon achane"
-  "d johnson": "david johnson",
-  "d london": "drake london",
-  "e moore": "elijah moore",
-  "s laporta": "sam laporta",
-  // Nickname / legal name changes
-  "marquise brown": "hollywood brown",    // ADP uses "Hollywood Brown"
-  "robby anderson": "robbie chosen",      // Legal name change
-  "robbie anderson": "robbie chosen",
-  // Typo corrections
-  "kenyon drake": "kenyan drake",
-  "darrell williams": "darrel williams",         // DB has single-L "Darrel"
-  "jacorey croskey-merritt": "jacory croskey-merritt", // ADP uses "Jacory"
-  "jacorey croskey merritt": "jacory croskey-merritt",
-};
-
-export function normalizeName(name: string): string {
-  let n = name
-    .toLowerCase()
-    .replace(/^exp\.?\s*rights\s*to\s+/i, "")  // Strip "Exp. Rights to" prefix
-    .replace(/\s{2,}\S+$/, "")                  // Strip trailing team abbr ("   LV", "   FA")
-    .replace(/[.']/g, "")
-    .replace(/\b(jr|sr|ii|iii|iv|v)\b/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return NAME_CORRECTIONS[n] ?? n;
-}
+// normalizeName + extractKeeperRightsPlayer imported from shared module
+import { normalizeName, extractKeeperRightsPlayer, getCanonicalDisplayName } from "./normalize-trade-name";
+export { normalizeName, extractKeeperRightsPlayer, getCanonicalDisplayName };
 
 const YEAR_DISCOUNT: Record<number, number> = {
   2026: 1.0,

@@ -1,4 +1,5 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
+import { normalizeName, extractKeeperRightsPlayer } from "../../lib/normalize-trade-name.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
@@ -50,23 +51,7 @@ function getAgeFactor(age: number, ageCurve: number): number {
   return 1.0 + (raw - 1.0) * ageCurve;
 }
 
-// ─── Name Normalization ─────────────────────────────────────
-// Strips periods, apostrophes, suffixes (Jr/Sr/II/III/IV/V),
-// collapses whitespace, and applies known corrections.
-const NAME_CORRECTIONS: Record<string, string> = {
-  "patrick maholmes": "patrick mahomes",
-  "patrick maholmes ii": "patrick mahomes",
-};
-
-function normalizeName(name: string): string {
-  let n = name
-    .toLowerCase()
-    .replace(/[.']/g, "")            // strip periods and apostrophes
-    .replace(/\b(jr|sr|ii|iii|iv|v)\b/gi, "")  // strip suffixes
-    .replace(/\s+/g, " ")            // collapse whitespace
-    .trim();
-  return NAME_CORRECTIONS[n] ?? n;
-}
+// normalizeName + extractKeeperRightsPlayer imported from shared module
 
 // Future pick discount: computed from futurePickDiscount modifier
 const CURRENT_YEAR_FOR_DISCOUNT = 2026;

@@ -53,13 +53,14 @@ type SeedResult = {
 const CATEGORIES = [
   { value: "keepers", label: "Keepers", icon: "shield" as IconName },
   { value: "draft_picks", label: "Draft Picks", icon: "list-ordered" as IconName },
+  { value: "draft_order", label: "Draft Order", icon: "clipboard" as IconName },
   { value: "trades", label: "Trades", icon: "arrow-left-right" as IconName },
   { value: "rosters", label: "Rosters", icon: "clipboard-list" as IconName },
   { value: "rankings", label: "Rankings", icon: "trophy" as IconName },
   { value: "other", label: "Other", icon: "file-text" as IconName },
 ];
 
-const SEASONS = Array.from({ length: 12 }, (_, i) => String(2024 + i));
+const SEASONS = Array.from({ length: 18 }, (_, i) => String(2018 + i));
 
 // ─── Upload Slot (moved from HistoricalUploader) ────────────
 function UploadSlot({
