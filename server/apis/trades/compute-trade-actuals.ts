@@ -1,4 +1,5 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
+import { normalizeName } from "../../lib/normalize-trade-name.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
@@ -155,21 +156,7 @@ const WeeklyActualsSchema = z.object({
 
 type WeeklyActualsRow = z.infer<typeof WeeklyActualsSchema>;
 
-// Name normalization (mirrors client)
-const NAME_CORRECTIONS: Record<string, string> = {
-  "patrick maholmes": "patrick mahomes",
-  "patrick maholmes ii": "patrick mahomes",
-};
-
-function normalizeName(name: string): string {
-  let n = name
-    .toLowerCase()
-    .replace(/[.']/g, "")
-    .replace(/\b(jr|sr|ii|iii|iv|v)\b/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return NAME_CORRECTIONS[n] ?? n;
-}
+// normalizeName imported from shared module
 
 /**
  * Extract weekly scores from a row up to a given week.
