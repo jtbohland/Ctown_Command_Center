@@ -378,6 +378,7 @@ const VerdictResult = z.object({
   actualsUsed: z.boolean(),
   rightsUsed: z.boolean(),
   confidence: z.string(),
+  confidenceReasons: z.array(z.string()),
   unresolvedAssetCount: z.number(),
   unresolvedAssetNames: z.array(z.string()),
   rightsAssumptions: z.array(z.string()),
@@ -677,7 +678,7 @@ export default api({
           status: "skipped", reason: "No assets found for this trade", blendInfo: null,
           identityStatus: "resolved", adpStatus: "current_season_adp",
           fallbackUsed: false, actualsUsed: false, rightsUsed: false,
-          confidence: "high", unresolvedAssetCount: 0, unresolvedAssetNames: [],
+          confidence: "high", confidenceReasons: [], unresolvedAssetCount: 0, unresolvedAssetNames: [],
           rightsAssumptions: [],
         });
         continue;
@@ -1059,6 +1060,38 @@ export default api({
         if (ad.confidence === "medium") tradeConfidence = "medium";
       }
 
+      // Compute human-readable confidence reasons
+      const confidenceReasons: string[] = [];
+      const hasBlended = assetDetails.some(ad => ad.blended);
+      if (hasBlended && phaseInfo) {
+        confidenceReasons.push(`In-season Actuals were available only through Week ${phaseInfo.lastCompletedWeek}`);
+      }
+      if (assetDetails.some(ad => ad.fallbackBaseline != null)) {
+        confidenceReasons.push("One or more player assets used a position-specific fallback");
+      }
+      if (assetDetails.some(ad => ad.adpStatus === "no_current_season_adp" || ad.adpStatus === "outside_export_range")) {
+        confidenceReasons.push("Current-season ADP was unavailable, but Actuals or historical data were available");
+      }
+      if (assetDetails.some(ad => ad.adpStatus === "adp_table_match_after_alias")) {
+        confidenceReasons.push("A player name was matched through an approved alias");
+      }
+      if (assetDetails.some(ad => ad.assetType === "pick")) {
+        const hasRoundOnly = assets.some(a => a.asset_type === "pick" && a.pick_number == null && a.pick_round != null);
+        const hasFutureDiscount = assetDetails.some(ad => ad.futureDiscount != null && ad.futureDiscount < 1);
+        if (hasRoundOnly || hasFutureDiscount) {
+          confidenceReasons.push("A future or round-only pick required midpoint valuation and/or a future-year discount");
+        }
+      }
+      if (assetDetails.some(ad => ad.isKeeperRights)) {
+        confidenceReasons.push("The trade included exclusive keeper rights");
+      }
+      if (isThreeTeam) {
+        confidenceReasons.push("The trade was a three-team transaction");
+      }
+      if (assetDetails.some(ad => ad.identityStatus === "resolved_identity_no_coverage")) {
+        confidenceReasons.push("One or more assets had limited source coverage");
+      }
+
       // Determine composite identity/adp status for the trade
       let tradeIdentityStatus: string = "resolved";
       let tradeAdpStatus: string = "current_season_adp";
@@ -1107,6 +1140,7 @@ export default api({
             identityStatus: tradeIdentityStatus, adpStatus: tradeAdpStatus,
             fallbackUsed: tradeFallbackUsed, actualsUsed: tradeActualsUsed, rightsUsed: tradeRightsUsed,
             confidence: tradeConfidence,
+            confidenceReasons,
             unresolvedAssetCount: unresolvedCount,
             unresolvedAssetNames: tradeUnresolved.map(u => u.playerName ?? "unknown"),
             rightsAssumptions: tradeRightsAssumptions,
@@ -1146,6 +1180,7 @@ export default api({
           identityStatus: tradeIdentityStatus, adpStatus: tradeAdpStatus,
           fallbackUsed: tradeFallbackUsed, actualsUsed: tradeActualsUsed, rightsUsed: tradeRightsUsed,
           confidence: tradeConfidence,
+          confidenceReasons,
           unresolvedAssetCount: unresolvedCount,
           unresolvedAssetNames: tradeUnresolved.map(u => u.playerName ?? "unknown"),
           rightsAssumptions: tradeRightsAssumptions,
@@ -1179,6 +1214,7 @@ export default api({
             identityStatus: tradeIdentityStatus, adpStatus: tradeAdpStatus,
             fallbackUsed: tradeFallbackUsed, actualsUsed: tradeActualsUsed, rightsUsed: tradeRightsUsed,
             confidence: tradeConfidence,
+            confidenceReasons,
             unresolvedAssetCount: unresolvedCount,
             unresolvedAssetNames: tradeUnresolved.map(u => u.playerName ?? "unknown"),
             rightsAssumptions: tradeRightsAssumptions,
@@ -1222,6 +1258,7 @@ export default api({
           identityStatus: tradeIdentityStatus, adpStatus: tradeAdpStatus,
           fallbackUsed: tradeFallbackUsed, actualsUsed: tradeActualsUsed, rightsUsed: tradeRightsUsed,
           confidence: tradeConfidence,
+          confidenceReasons,
           unresolvedAssetCount: unresolvedCount,
           unresolvedAssetNames: tradeUnresolved.map(u => u.playerName ?? "unknown"),
           rightsAssumptions: tradeRightsAssumptions,
@@ -1250,8 +1287,9 @@ export default api({
                 team_b_total = $7,
                 valuation_complete = $8,
                 team_c_total = $9,
-                confidence = $10
-               WHERE id = $11`,
+                confidence = $10,
+                confidence_reasons = $11
+               WHERE id = $12`,
               [
                 r.verdictLabel,
                 r.verdictEmoji,
@@ -1263,6 +1301,7 @@ export default api({
                 r.status === "valued",
                 r.teamCTotal ?? null,
                 r.confidence ?? null,
+                r.confidenceReasons.length > 0 ? r.confidenceReasons : null,
                 r.tradeId,
               ],
               { label: `Update verdict for trade #${r.tradeNumber}` }

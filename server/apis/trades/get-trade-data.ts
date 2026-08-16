@@ -30,6 +30,7 @@ const TradeSchema = z.object({
   team_c_total: z.coerce.number().nullable(),
   valuation_complete: z.boolean().nullable(),
   confidence: z.string().nullable(),
+  confidence_reasons: z.array(z.string()).nullable(),
 });
 
 const TradeAssetSchema = z.object({
@@ -142,7 +143,7 @@ export default api({
         t.verdict_label, t.verdict_emoji, t.verdict_severity,
         t.winner_team_id, t.pct_difference,
         t.team_a_total, t.team_b_total, t.team_c_total,
-        t.valuation_complete, t.confidence
+        t.valuation_complete, t.confidence, t.confidence_reasons
       FROM ffwr_trades t
       JOIN ffwr_teams ta ON ta.id = t.team_a_id
       JOIN ffwr_teams tb ON tb.id = t.team_b_id

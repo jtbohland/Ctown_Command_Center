@@ -2,6 +2,7 @@ import { useCallback, useMemo } from "react";
 import { useApiData } from "@/hooks/useApiData";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { getCTownDisplaySeason, getAllCTownSeasons } from "@/lib/trade-utils";
 
 import TradeBuilder from "./TradeBuilder";
 import TradeHistory from "./TradeHistory";
@@ -19,11 +20,15 @@ export default function ArmChairDealer() {
     refetch();
   }, [refetch]);
 
-  // Extract unique seasons from trade data for filters
-  const seasons = useMemo(() => {
-    if (!data?.trades) return [];
-    const s = new Set(data.trades.map((t: { season: string }) => t.season));
-    return Array.from(s).sort().reverse() as string[];
+  // Derive display seasons using NFL calendar
+  const seasonCount = useMemo(() => {
+    if (!data?.trades) return 0;
+    const present = new Set(
+      data.trades.map((t: { trade_date: string | null; season: string }) =>
+        getCTownDisplaySeason(t.trade_date, t.season)
+      )
+    );
+    return getAllCTownSeasons().filter((s) => present.has(s)).length;
   }, [data?.trades]);
 
 
@@ -73,7 +78,7 @@ export default function ArmChairDealer() {
           <div>
             <h2 className="text-lg font-extrabold tracking-tight">The C-Town Exchange</h2>
             <span className="text-[10px] text-muted-foreground">
-              Dynasty trade evaluation powered by ADP + Actuals • {trades.length} historical trades across {seasons.length} seasons
+              Dynasty trade evaluation powered by ADP + Actuals • {trades.length} historical trades across {seasonCount} seasons
             </span>
           </div>
           {fetching && (
@@ -102,11 +107,11 @@ export default function ArmChairDealer() {
         </TabsContent>
 
         <TabsContent value="history" className="flex-1 overflow-auto px-5 py-4">
-          <TradeHistory trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} />
+          <TradeHistory trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} />
         </TabsContent>
 
         <TabsContent value="gbu" className="flex-1 overflow-auto px-5 py-4">
-          <GoodBadUgly trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} />
+          <GoodBadUgly trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} />
         </TabsContent>
 
         <TabsContent value="siren" className="flex-1 overflow-auto px-5 py-4">
