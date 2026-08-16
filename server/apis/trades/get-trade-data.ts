@@ -19,6 +19,17 @@ const TradeSchema = z.object({
   trade_type: z.string().nullable(),
   participant_count: z.coerce.number().nullable(),
   three_team_complete: z.boolean().nullable(),
+  // Canonical verdict fields from BackfillTradeVerdicts
+  verdict_label: z.string().nullable(),
+  verdict_emoji: z.string().nullable(),
+  verdict_severity: z.string().nullable(),
+  winner_team_id: z.coerce.number().nullable(),
+  pct_difference: z.coerce.number().nullable(),
+  team_a_total: z.coerce.number().nullable(),
+  team_b_total: z.coerce.number().nullable(),
+  team_c_total: z.coerce.number().nullable(),
+  valuation_complete: z.boolean().nullable(),
+  confidence: z.string().nullable(),
 });
 
 const TradeAssetSchema = z.object({
@@ -127,7 +138,11 @@ export default api({
         tb.team_name as team_b_name,
         tc.team_name as team_c_name,
         t.status, t.period, t.notes,
-        t.trade_type, t.participant_count, t.three_team_complete
+        t.trade_type, t.participant_count, t.three_team_complete,
+        t.verdict_label, t.verdict_emoji, t.verdict_severity,
+        t.winner_team_id, t.pct_difference,
+        t.team_a_total, t.team_b_total, t.team_c_total,
+        t.valuation_complete, t.confidence
       FROM ffwr_trades t
       JOIN ffwr_teams ta ON ta.id = t.team_a_id
       JOIN ffwr_teams tb ON tb.id = t.team_b_id

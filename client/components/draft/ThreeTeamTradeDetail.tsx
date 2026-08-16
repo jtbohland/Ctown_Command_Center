@@ -2,7 +2,6 @@ import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
 import {
-  evaluateThreeTeamTrade,
   buildSeasonAdpMap,
   getSeasonAdp,
   calcPlayerValue,
@@ -10,9 +9,7 @@ import {
   SEVERITY_COLORS,
   type TradeRow,
   type TradeAssetRow,
-  type ThreeTeamValuation,
-  type TeamValuationResult,
-  type DynastyContext,
+  type TeamRow,
 } from "@/lib/trade-utils";
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -81,6 +78,13 @@ function AssetRow({
 
 // ─── Team Column ─────────────────────────────────────────────
 
+interface TeamDisplayData {
+  teamId: number;
+  teamName: string;
+  dbTotal: number;
+  rank: number;
+}
+
 function TeamColumn({
   team,
   sentAssets,
@@ -90,7 +94,7 @@ function TeamColumn({
   isWinner,
   colorClass,
 }: {
-  team: TeamValuationResult;
+  team: TeamDisplayData;
   sentAssets: TradeAssetRow[];
   receivedAssets: TradeAssetRow[];
   tradeSeason: string;
@@ -98,6 +102,10 @@ function TeamColumn({
   isWinner: boolean;
   colorClass: string;
 }) {
+  const sentTotal = sentAssets.reduce((sum, a) => sum + getAssetValue(a, tradeSeason, seasonAdpMap), 0);
+  const receivedTotal = receivedAssets.reduce((sum, a) => sum + getAssetValue(a, tradeSeason, seasonAdpMap), 0);
+  const netValue = team.dbTotal; // Use DB total as canonical net value
+
   return (
     <div className="space-y-2">
       {/* Team header */}
@@ -126,7 +134,7 @@ function TeamColumn({
           <div className="mt-1 pt-1 border-t border-border/30 flex items-center justify-between">
             <span className="text-[10px] text-muted-foreground">Sent</span>
             <span className="text-[10px] font-mono font-bold text-red-400">
-              −{Math.round(team.sentValue).toLocaleString()}
+              −{Math.round(sentTotal).toLocaleString()}
             </span>
           </div>
         </div>
@@ -144,26 +152,26 @@ function TeamColumn({
           <div className="mt-1 pt-1 border-t border-border/30 flex items-center justify-between">
             <span className="text-[10px] text-muted-foreground">Received</span>
             <span className="text-[10px] font-mono font-bold text-emerald-400">
-              +{Math.round(team.receivedValue).toLocaleString()}
+              +{Math.round(receivedTotal).toLocaleString()}
             </span>
           </div>
         </div>
       )}
 
-      {/* Net value */}
+      {/* Net value from DB */}
       <div className="pt-1 border-t border-border/50 flex items-center justify-between">
         <span className="text-[10px] font-bold text-muted-foreground">Net Value</span>
         <span
           className={`text-xs font-bold font-mono ${
-            team.netValue > 0
+            netValue > 0
               ? "text-emerald-400"
-              : team.netValue < 0
+              : netValue < 0
                 ? "text-red-400"
                 : "text-muted-foreground"
           }`}
         >
-          {team.netValue >= 0 ? "+" : ""}
-          {Math.round(team.netValue).toLocaleString()}
+          {netValue >= 0 ? "+" : ""}
+          {Math.round(netValue).toLocaleString()}
         </span>
       </div>
     </div>
@@ -176,33 +184,59 @@ interface ThreeTeamTradeDetailProps {
   trade: TradeRow;
   assets: TradeAssetRow[];
   seasonAdpMap: Map<string, Map<string, number>>;
-  dynastyCtx?: DynastyContext;
+  teams: TeamRow[];
 }
 
 export default function ThreeTeamTradeDetail({
   trade,
   assets,
   seasonAdpMap,
-  dynastyCtx,
+  teams,
 }: ThreeTeamTradeDetailProps) {
-  const valuation = useMemo(
-    () => evaluateThreeTeamTrade(trade, assets, seasonAdpMap, dynastyCtx),
-    [trade, assets, seasonAdpMap, dynastyCtx],
-  );
-
   const tradeAssets = useMemo(
     () => assets.filter((a) => a.trade_id === trade.id),
     [assets, trade.id],
   );
 
-  const severity = valuation.verdict.severity;
-  const colors = SEVERITY_COLORS[severity];
+  // Build team display data from DB totals
+  const teamDisplayData = useMemo(() => {
+    const teamA: TeamDisplayData = {
+      teamId: trade.team_a_id,
+      teamName: trade.team_a_name,
+      dbTotal: trade.team_a_total ?? 0,
+      rank: 0,
+    };
+    const teamB: TeamDisplayData = {
+      teamId: trade.team_b_id,
+      teamName: trade.team_b_name,
+      dbTotal: trade.team_b_total ?? 0,
+      rank: 0,
+    };
+    const teamC: TeamDisplayData = {
+      teamId: trade.team_c_id ?? 0,
+      teamName: trade.team_c_name ?? "Unknown",
+      dbTotal: trade.team_c_total ?? 0,
+      rank: 0,
+    };
+
+    const sorted = [teamA, teamB, teamC].sort((a, b) => b.dbTotal - a.dbTotal);
+    sorted.forEach((t, i) => { t.rank = i + 1; });
+    return sorted;
+  }, [trade]);
+
+  const winnerId = trade.winner_team_id;
+  const winnerTeam = teamDisplayData.find(t => t.teamId === winnerId) ?? teamDisplayData[0];
+  const secondTeam = teamDisplayData.find(t => t.rank === 2) ?? teamDisplayData[1];
+  const winnerMargin = winnerTeam.dbTotal - secondTeam.dbTotal;
+
+  const severity = (trade.verdict_severity ?? "fair") as keyof typeof SEVERITY_COLORS;
+  const colors = SEVERITY_COLORS[severity] ?? SEVERITY_COLORS.fair;
 
   return (
     <div className="space-y-3">
       {/* Three-column layout — one per team */}
       <div className="grid grid-cols-3 gap-3">
-        {valuation.teams.map((team) => {
+        {teamDisplayData.map((team) => {
           const sentAssets = tradeAssets.filter((a) => a.from_team_id === team.teamId);
           const receivedAssets = tradeAssets.filter((a) => a.recipient_team_id === team.teamId);
           return (
@@ -213,7 +247,7 @@ export default function ThreeTeamTradeDetail({
               receivedAssets={receivedAssets}
               tradeSeason={trade.season}
               seasonAdpMap={seasonAdpMap}
-              isWinner={team.rank === 1}
+              isWinner={team.teamId === winnerId}
               colorClass={colors.text}
             />
           );
@@ -221,29 +255,19 @@ export default function ThreeTeamTradeDetail({
       </div>
 
       {/* Winner banner */}
-      <div className={`text-center pt-2 border-t border-border/30`}>
+      <div className="text-center pt-2 border-t border-border/30">
         <span className="text-[11px] font-bold">
-          {getTeamEmoji(valuation.winner.teamName)}{" "}
-          <span className="text-emerald-400">{valuation.winner.teamName}</span>
+          {getTeamEmoji(winnerTeam.teamName)}{" "}
+          <span className="text-emerald-400">{winnerTeam.teamName}</span>
           <span className="text-muted-foreground"> gets the best deal </span>
           <span className="font-mono text-emerald-400">
-            (+{Math.round(valuation.winner.netValue).toLocaleString()} net)
+            ({Math.round(winnerTeam.dbTotal).toLocaleString()} pts)
           </span>
           <span className="text-muted-foreground ml-1.5">
-            · Margin: +{Math.round(valuation.winnerMarginOverSecond).toLocaleString()} over 2nd
+            · Margin: +{Math.round(winnerMargin).toLocaleString()} over 2nd
           </span>
         </span>
       </div>
     </div>
   );
-}
-
-/** Hook-free evaluator for three-team trades (used in list contexts) */
-export function evaluateThreeTeam(
-  trade: TradeRow,
-  assets: TradeAssetRow[],
-  seasonAdpMap: Map<string, Map<string, number>>,
-  dynastyCtx?: DynastyContext,
-): ThreeTeamValuation {
-  return evaluateThreeTeamTrade(trade, assets, seasonAdpMap, dynastyCtx);
 }

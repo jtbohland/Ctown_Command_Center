@@ -1248,8 +1248,10 @@ export default api({
                 pct_difference = $5,
                 team_a_total = $6,
                 team_b_total = $7,
-                valuation_complete = $8
-               WHERE id = $9`,
+                valuation_complete = $8,
+                team_c_total = $9,
+                confidence = $10
+               WHERE id = $11`,
               [
                 r.verdictLabel,
                 r.verdictEmoji,
@@ -1259,6 +1261,8 @@ export default api({
                 r.teamATotal,
                 r.teamBTotal,
                 r.status === "valued",
+                r.teamCTotal ?? null,
+                r.confidence ?? null,
                 r.tradeId,
               ],
               { label: `Update verdict for trade #${r.tradeNumber}` }

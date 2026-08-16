@@ -2,47 +2,33 @@ import { useState, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
-import { DEFAULT_MODIFIERS } from "@/lib/trade-modifiers";
 import {
-  evaluateHistoricalTrade,
-  evaluateThreeTeamTrade,
   isThreeTeamTrade,
   buildSeasonAdpMap,
-  buildSeasonAdpDetailMap,
   getSeasonAdp,
   calcPlayerValue,
   calcPickValue,
+  buildValuationFromDb,
   SEVERITY_COLORS,
   type TradeRow,
   type TradeAssetRow,
   type TeamRow,
   type HistoricalAdpRow,
   type VerdictSeverity,
-  type DynastyContext,
-  type TradeActualsResult,
-  type PlayerActualsResult,
-  type BlendedAuditEntry,
-  buildTradeActualsMap,
 } from "@/lib/trade-utils";
 import ThreeTeamTradeDetail from "./ThreeTeamTradeDetail";
 
-// ─── Phase Display Helpers ───────────────────────────────────
-const PHASE_LABELS: Record<string, { label: string; emoji: string; color: string }> = {
-  preseason: { label: "Pre", emoji: "📋", color: "text-slate-400" },
-  early: { label: "Early", emoji: "🌱", color: "text-blue-400" },
-  mid: { label: "Mid", emoji: "⚡", color: "text-amber-400" },
-  late: { label: "Late", emoji: "🔥", color: "text-orange-400" },
-  postseason: { label: "Post", emoji: "🏆", color: "text-emerald-400" },
-};
-
-function PhaseWeightBadge({ phase, weight }: { phase?: string; weight?: number }) {
-  if (!phase) return null;
-  const meta = PHASE_LABELS[phase] ?? { label: phase, emoji: "❓", color: "text-muted-foreground" };
-  const weightPct = weight != null ? `${Math.round(weight * 100)}%` : "0%";
+// ─── Confidence Badge ─────────────────────────────────────
+function ConfidenceBadge({ confidence }: { confidence?: string | null }) {
+  if (!confidence) return <span className="text-[9px] text-muted-foreground/50">—</span>;
+  const colors = confidence === 'high' ? 'border-emerald-500/30 text-emerald-400'
+    : confidence === 'low' ? 'border-red-500/30 text-red-400'
+    : 'border-amber-500/30 text-amber-400';
+  const icon = confidence === 'high' ? '✓' : confidence === 'low' ? '?' : '~';
   return (
-    <span className={`text-[9px] font-mono ${meta.color}`} title={`Actuals weight: ${weightPct} (${phase} season)`}>
-      {meta.emoji} {weightPct}
-    </span>
+    <Badge variant="outline" className={`text-[8px] px-1 py-0 ${colors}`}>
+      {icon} {confidence}
+    </Badge>
   );
 }
 
@@ -52,30 +38,28 @@ interface Props {
   teams: TeamRow[];
   historicalAdp: HistoricalAdpRow[];
   seasons: string[];
-  dynastyCtx?: DynastyContext;
-  tradeActuals: TradeActualsResult[];
 }
 
 const ITEMS_PER_PAGE = 20;
 
-export default function TradeHistory({ trades, assets, teams, historicalAdp, seasons, dynastyCtx, tradeActuals }: Props) {
+export default function TradeHistory({ trades, assets, teams, historicalAdp, seasons }: Props) {
   const [seasonFilter, setSeasonFilter] = useState<string>("all");
   const [page, setPage] = useState(0);
   const [expandedTrade, setExpandedTrade] = useState<number | null>(null);
 
-  // Season-aware ADP: season → (player_name → adp_rank)
+  // Season-aware ADP: season → (player_name → adp_rank) — still used for asset value display
   const seasonAdpMap = useMemo(() => buildSeasonAdpMap(historicalAdp), [historicalAdp]);
-  // Season ADP detail: season → (player_name → { adpRank, position }) for fallback
-  const seasonAdpDetailMap = useMemo(() => buildSeasonAdpDetailMap(historicalAdp), [historicalAdp]);
-  // Trade actuals map: tradeId → { meta, players }
-  const actualsMap = useMemo(() => buildTradeActualsMap(tradeActuals), [tradeActuals]);
 
+  // Use canonical DB verdicts — no more client-side valuation
   const tradesWithVerdicts = useMemo(() => {
-    return trades.map((trade) => ({
-      trade,
-      valuation: evaluateHistoricalTrade(trade, assets, seasonAdpMap, dynastyCtx, actualsMap, seasonAdpDetailMap, DEFAULT_MODIFIERS.unrankedFallbackFactor),
-    }));
-  }, [trades, assets, seasonAdpMap, dynastyCtx, actualsMap, seasonAdpDetailMap]);
+    return trades
+      .map((trade) => {
+        const valuation = buildValuationFromDb(trade, teams);
+        if (!valuation) return null;
+        return { trade, valuation };
+      })
+      .filter((t): t is { trade: TradeRow; valuation: NonNullable<ReturnType<typeof buildValuationFromDb>> } => t !== null);
+  }, [trades, teams]);
 
   const filteredTrades = useMemo(() => {
     if (seasonFilter === "all") return tradesWithVerdicts;
@@ -89,11 +73,15 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
 
   const totalPages = Math.ceil(filteredTrades.length / ITEMS_PER_PAGE);
 
-  // Count how many trades have actuals blended in
-  const blendedCount = useMemo(
-    () => filteredTrades.filter(t => t.valuation.actualsWeight && t.valuation.actualsWeight > 0).length,
-    [filteredTrades]
-  );
+  // Confidence breakdown
+  const confidenceCounts = useMemo(() => {
+    const counts = { high: 0, medium: 0, low: 0 };
+    for (const t of filteredTrades) {
+      const c = t.trade.confidence as keyof typeof counts;
+      if (c && c in counts) counts[c]++;
+    }
+    return counts;
+  }, [filteredTrades]);
 
   return (
     <div className="space-y-4">
@@ -112,11 +100,13 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
           </SelectContent>
         </Select>
 
-        {/* Blended actuals indicator (replaces toggle) */}
-        {blendedCount > 0 && (
+        {/* Confidence indicator */}
+        {(confidenceCounts.high > 0 || confidenceCounts.medium > 0) && (
           <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-2.5 py-1">
-            <span className="text-[10px] text-emerald-400 font-semibold">⚡ Blended</span>
-            <span className="text-[9px] text-emerald-400/70 font-mono">{blendedCount}/{filteredTrades.length}</span>
+            <span className="text-[10px] text-emerald-400 font-semibold">📊 Confidence</span>
+            <span className="text-[9px] text-emerald-400/70 font-mono">
+              {confidenceCounts.high}H / {confidenceCounts.medium}M{confidenceCounts.low > 0 ? ` / ${confidenceCounts.low}L` : ""}
+            </span>
           </div>
         )}
 
@@ -133,7 +123,7 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
         <span>Team B</span>
         <span className="text-center">Diff</span>
         <span>Season</span>
-        <span className="text-center">Blend</span>
+        <span className="text-center">Conf</span>
       </div>
 
       {/* Trade Rows */}
@@ -197,9 +187,9 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
 
                 <span className="text-[11px] text-muted-foreground">{trade.season}</span>
 
-                {/* Phase/Weight column (replaces Period) */}
+                {/* Confidence column */}
                 <div className="flex justify-center">
-                  <PhaseWeightBadge phase={valuation.seasonPhase} weight={valuation.actualsWeight} />
+                  <ConfidenceBadge confidence={trade.confidence} />
                 </div>
               </div>
 
@@ -211,7 +201,7 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
                       trade={trade}
                       assets={assets}
                       seasonAdpMap={seasonAdpMap}
-                      dynastyCtx={dynastyCtx}
+                      teams={teams}
                     />
                   </div>
                 ) : (
@@ -222,7 +212,6 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
                     teams={teams}
                     colors={colors}
                     seasonAdpMap={seasonAdpMap}
-                    actualsMap={actualsMap}
                   />
                 )
               )}
@@ -265,7 +254,6 @@ function ExpandedTradeDetail({
   teams,
   colors,
   seasonAdpMap,
-  actualsMap,
 }: {
   trade: TradeRow;
   assets: TradeAssetRow[];
@@ -273,12 +261,9 @@ function ExpandedTradeDetail({
   teams: TeamRow[];
   colors: any;
   seasonAdpMap: Map<string, Map<string, number>>;
-  actualsMap: Map<number, { meta: TradeActualsResult; players: Map<string, PlayerActualsResult> }>;
 }) {
   const teamAAssets = assets.filter((a) => a.trade_id === trade.id && a.from_team_id === trade.team_a_id);
   const teamBAssets = assets.filter((a) => a.trade_id === trade.id && a.from_team_id === trade.team_b_id);
-  const tradeActuals = actualsMap.get(trade.id);
-  const blendedAudit = valuation.blendedAudit as BlendedAuditEntry[] | undefined;
 
   // Compute sent/received/net for each team (mirroring 3-way pattern)
   const teamASent = valuation.teamAValue;
@@ -290,18 +275,11 @@ function ExpandedTradeDetail({
 
   return (
     <div className={`ml-4 mr-4 mb-2 mt-1 border-t ${colors.border} ${colors.bg} rounded-b-lg px-4 py-3`}>
-      {/* Phase indicator bar */}
-      {tradeActuals && tradeActuals.meta.actualsWeight > 0 && (
+      {/* Confidence indicator */}
+      {trade.confidence && (
         <div className="flex items-center gap-2 mb-3 px-2 py-1.5 bg-muted/30 rounded-lg border border-border/30">
-          <span className="text-[10px] font-bold text-muted-foreground">Blend:</span>
-          <PhaseWeightBadge phase={tradeActuals.meta.seasonPhase} weight={tradeActuals.meta.actualsWeight} />
-          <span className="text-[9px] text-muted-foreground">
-            Week {tradeActuals.meta.lastCompletedWeek}/{tradeActuals.meta.totalWeeks} complete
-          </span>
-          <span className="text-[9px] text-muted-foreground/60">•</span>
-          <span className="text-[9px] text-muted-foreground">
-            Cutoff: {tradeActuals.meta.cutoffDate}
-          </span>
+          <span className="text-[10px] font-bold text-muted-foreground">Confidence:</span>
+          <ConfidenceBadge confidence={trade.confidence} />
         </div>
       )}
 
@@ -317,7 +295,6 @@ function ExpandedTradeDetail({
           tradeSeason={trade.season}
           seasonAdpMap={seasonAdpMap}
           colorClass={colors.text}
-          blendedAudit={blendedAudit}
           side="left"
         />
         <TwoWayTeamColumn
@@ -331,7 +308,6 @@ function ExpandedTradeDetail({
           tradeSeason={trade.season}
           seasonAdpMap={seasonAdpMap}
           colorClass={colors.text}
-          blendedAudit={blendedAudit}
           side="right"
         />
       </div>
@@ -379,84 +355,33 @@ function getAssetDisplayValue(a: TradeAssetRow, tradeSeason: string, seasonAdpMa
   return calcPickValue(round, year, a.pick_number ?? undefined);
 }
 
-// ─── Asset Row (shared by sends/receives sections) ──────────
+// ─── Asset Row (simplified — no per-asset blended audit) ────
 function TradeAssetItem({
   a,
   tradeSeason,
   seasonAdpMap,
-  audit,
 }: {
   a: TradeAssetRow;
   tradeSeason: string;
   seasonAdpMap: Map<string, Map<string, number>>;
-  audit?: BlendedAuditEntry;
 }) {
-  const baseVal = getAssetDisplayValue(a, tradeSeason, seasonAdpMap);
-  const displayValue = audit ? audit.blendedValue : baseVal;
+  const val = getAssetDisplayValue(a, tradeSeason, seasonAdpMap);
 
   return (
-    <div className="space-y-0.5">
-      <div className="flex items-center gap-1.5 py-0.5 text-xs">
-        {a.asset_type === "player" ? (
-          <Badge className={`text-[9px] px-1 py-0 ${POSITION_BG_CLASSES[a.player_position ?? ""] ?? "bg-muted"}`}>
-            {a.player_position}
-          </Badge>
-        ) : (
-          <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/10 border-amber-500/30 text-amber-400">📋</Badge>
-        )}
-        <span className="truncate flex-1">
-          {a.asset_type === "player" ? a.player_name : formatPickLabel(a)}
-        </span>
-        <span className="text-[10px] font-mono text-muted-foreground shrink-0">
-          ({Math.round(displayValue).toLocaleString()})
-        </span>
-        {/* Evidence status badges */}
-        {audit?.evidence?.fallbackUsed && (
-          <Badge variant="outline" className="text-[8px] px-1 py-0 shrink-0 border-yellow-500/30 bg-yellow-500/10 text-yellow-400">
-            {audit.evidence.fallbackType === "rookie_baseline" ? "🌟 Rookie"
-              : audit.evidence.fallbackType === "actuals_derived" ? "📊 Actuals"
-              : audit.evidence.adpStatus === "outside_export_range" ? "📏 Range"
-              : "🪤 Fallback"}
-          </Badge>
-        )}
-        {audit?.evidence && !audit.evidence.fallbackUsed && audit.evidence.valuationConfidence === "medium" && (
-          <Badge variant="outline" className="text-[8px] px-1 py-0 shrink-0 border-blue-500/30 bg-blue-500/10 text-blue-400">
-            {audit.evidence.combinedEvidenceStatus === "adp_only" ? "📋 ADP" : "📊 Act"}
-          </Badge>
-        )}
-      </div>
-      {/* Fallback reason tooltip */}
-      {audit?.evidence?.fallbackReason && (
-        <div className="ml-7 text-[8px] text-yellow-400/70 italic">
-          {audit.evidence.fallbackReason}
-        </div>
+    <div className="flex items-center gap-1.5 py-0.5 text-xs">
+      {a.asset_type === "player" ? (
+        <Badge className={`text-[9px] px-1 py-0 ${POSITION_BG_CLASSES[a.player_position ?? ""] ?? "bg-muted"}`}>
+          {a.player_position}
+        </Badge>
+      ) : (
+        <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/10 border-amber-500/30 text-amber-400">📋</Badge>
       )}
-      {audit && audit.actualsWeight > 0 && (
-        <div className="ml-7 flex items-center gap-2 text-[9px] flex-wrap">
-          <span className="text-muted-foreground">
-            Base {Math.round(audit.baselineValue).toLocaleString()}
-          </span>
-          <span className="text-muted-foreground/50">×</span>
-          <span className="text-muted-foreground">
-            {Math.round((1 - audit.actualsWeight) * 100)}%
-          </span>
-          <span className="text-muted-foreground/50">+</span>
-          <span className="text-muted-foreground">
-            Act {audit.actualsValue.toFixed(1)}
-          </span>
-          <span className="text-muted-foreground/50">×</span>
-          <span className="text-muted-foreground">
-            {Math.round(audit.actualsWeight * 100)}%
-          </span>
-          <span className={audit.blendDelta > 0 ? "text-emerald-400 font-bold" : audit.blendDelta < 0 ? "text-red-400 font-bold" : "text-muted-foreground"}>
-            {audit.blendDelta > 0 ? "▲" : audit.blendDelta < 0 ? "▼" : "●"}
-            {audit.blendDelta !== 0 ? ` ${Math.abs(Math.round(audit.blendDelta)).toLocaleString()}` : " same"}
-          </span>
-          <span className="text-muted-foreground/50">
-            ({audit.ppg.toFixed(1)} PPG, Wk {audit.lastCompletedWeek})
-          </span>
-        </div>
-      )}
+      <span className="truncate flex-1">
+        {a.asset_type === "player" ? a.player_name : formatPickLabel(a)}
+      </span>
+      <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+        ({Math.round(val).toLocaleString()})
+      </span>
     </div>
   );
 }
@@ -473,7 +398,6 @@ function TwoWayTeamColumn({
   tradeSeason,
   seasonAdpMap,
   colorClass,
-  blendedAudit,
   side = "left",
 }: {
   teamName: string;
@@ -486,19 +410,8 @@ function TwoWayTeamColumn({
   tradeSeason: string;
   seasonAdpMap: Map<string, Map<string, number>>;
   colorClass: string;
-  blendedAudit?: BlendedAuditEntry[];
   side?: "left" | "right";
 }) {
-  const auditByName = useMemo(() => {
-    const map = new Map<string, BlendedAuditEntry>();
-    if (blendedAudit) {
-      for (const entry of blendedAudit) {
-        map.set(entry.playerName, entry);
-      }
-    }
-    return map;
-  }, [blendedAudit]);
-
   return (
     <div className="space-y-2">
       {/* Team header */}
@@ -517,13 +430,7 @@ function TwoWayTeamColumn({
         <div>
           <div className={`text-[10px] font-bold ${colorClass} mb-0.5`}>{side === "left" ? "Sends →" : "← Sends"}</div>
           {sentAssets.map((a) => (
-            <TradeAssetItem
-              key={a.id}
-              a={a}
-              tradeSeason={tradeSeason}
-              seasonAdpMap={seasonAdpMap}
-              audit={a.asset_type === "player" && a.player_name ? auditByName.get(a.player_name) : undefined}
-            />
+            <TradeAssetItem key={a.id} a={a} tradeSeason={tradeSeason} seasonAdpMap={seasonAdpMap} />
           ))}
           <div className="mt-1 pt-1 border-t border-border/30 flex items-center justify-between">
             <span className="text-[10px] text-muted-foreground">Sent</span>
@@ -539,13 +446,7 @@ function TwoWayTeamColumn({
         <div>
           <div className={`text-[10px] font-bold ${colorClass} mb-0.5`}>{side === "left" ? "Receives ←" : "→ Receives"}</div>
           {receivedAssets.map((a) => (
-            <TradeAssetItem
-              key={a.id}
-              a={a}
-              tradeSeason={tradeSeason}
-              seasonAdpMap={seasonAdpMap}
-              audit={a.asset_type === "player" && a.player_name ? auditByName.get(a.player_name) : undefined}
-            />
+            <TradeAssetItem key={a.id} a={a} tradeSeason={tradeSeason} seasonAdpMap={seasonAdpMap} />
           ))}
           <div className="mt-1 pt-1 border-t border-border/30 flex items-center justify-between">
             <span className="text-[10px] text-muted-foreground">Received</span>

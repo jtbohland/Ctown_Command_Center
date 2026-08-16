@@ -135,6 +135,17 @@ export interface TradeRow {
   trade_type: string | null;
   participant_count: number | null;
   three_team_complete: boolean | null;
+  // Canonical verdict fields from DB (BackfillTradeVerdicts)
+  verdict_label: string | null;
+  verdict_emoji: string | null;
+  verdict_severity: string | null;
+  winner_team_id: number | null;
+  pct_difference: number | null;
+  team_a_total: number | null;
+  team_b_total: number | null;
+  team_c_total: number | null;
+  valuation_complete: boolean | null;
+  confidence: string | null;
 }
 
 export interface TradeAssetRow {
@@ -309,6 +320,41 @@ export interface ThreeTeamValuation {
 /** Type guard: is this trade a three-team trade? */
 export function isThreeTeamTrade(trade: TradeRow): boolean {
   return trade.trade_type === "three_team" && trade.participant_count === 3;
+}
+
+/**
+ * Build a TradeValuation from DB-stored verdict fields.
+ * Used by Ledger + History to display canonical verdicts without re-computing.
+ */
+export function buildValuationFromDb(trade: TradeRow, teams: TeamRow[]): TradeValuation | null {
+  if (!trade.valuation_complete || trade.verdict_label == null) return null;
+  const teamAValue = trade.team_a_total ?? 0;
+  const teamBValue = trade.team_b_total ?? 0;
+  const pctDifference = trade.pct_difference ?? 0;
+  const absoluteValueGap = Math.abs(teamBValue - teamAValue);
+  const tradeSize = teamAValue + teamBValue;
+  const winnerTeamId = trade.winner_team_id ?? null;
+  const winnerTeam = winnerTeamId != null ? teams.find(t => t.id === winnerTeamId) : null;
+  const loserValue = winnerTeamId === trade.team_a_id ? teamBValue
+    : winnerTeamId === trade.team_b_id ? teamAValue
+    : 0;
+  const loserLossPercentage = loserValue > 0 ? Math.round((absoluteValueGap / loserValue) * 100) : 0;
+
+  return {
+    teamAValue,
+    teamBValue,
+    pctDifference: Math.round(Math.abs(pctDifference) * 10) / 10,
+    verdict: {
+      label: trade.verdict_label,
+      emoji: trade.verdict_emoji ?? "",
+      severity: (trade.verdict_severity ?? "fair") as VerdictSeverity,
+    },
+    winningTeamId: winnerTeamId,
+    winningTeamName: winnerTeam?.team_name ?? null,
+    absoluteValueGap,
+    tradeSize,
+    loserLossPercentage,
+  };
 }
 
 // ─── Dynasty Multiplier Helper ───────────────────────────────
