@@ -117,7 +117,7 @@ export default function Playbook() {
       content: (
         <div className="space-y-3 text-sm text-muted-foreground">
           <Tip text="With the keeper offset, a 1st round pick (ADP ~45-55) is a solid starter, not a league-winner. It takes multiple picks to match an elite player — that's by design." />
-          <Tip text="Future year picks are discounted. A 2028 1st round pick is worth ~65% of the same pick this year." />
+          <Tip text="Future year picks are discounted 10% per year. A 2027 pick is worth ~90%, 2028 is ~81%, and 2029+ is ~73% of face value." />
           <Tip text="Use The Verdicts to study which managers tend to 'win' trades and which ones overpay." />
           <Tip text="Log every trade with Sound The Alarm — the more data, the better Deal Déjà Vu works." />
           <Tip text="Check The Treasury before proposing trades to see who's pick-rich (more willing to trade picks)." />

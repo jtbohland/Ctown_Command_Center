@@ -424,7 +424,7 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp }: Pr
         <Input
           value={playerSearch}
           onChange={handlePlayerSearch}
-          placeholder="\ud83d\udd0d Search player name\u2026"
+          placeholder="🔍 Search player name…"
           className="h-8 w-44 text-xs"
         />
         <Select value={selectedSeason} onValueChange={handleSeasonChange}>
