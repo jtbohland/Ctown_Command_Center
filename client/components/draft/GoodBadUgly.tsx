@@ -9,6 +9,8 @@ import {
   calcPlayerValue,
   calcPickValue,
   buildValuationFromDb,
+  getCTownDisplaySeason,
+  getAllCTownSeasons,
   SEVERITY_COLORS,
   type TradeRow,
   type TradeAssetRow,
@@ -19,13 +21,13 @@ import {
   type ThreeTeamValuation,
 } from "@/lib/trade-utils";
 import ThreeTeamTradeDetail from "./ThreeTeamTradeDetail";
+import { ConfidenceTooltip } from "./ConfidenceTooltip";
 
 interface Props {
   trades: TradeRow[];
   assets: TradeAssetRow[];
   teams: TeamRow[];
   historicalAdp: HistoricalAdpRow[];
-  seasons: string[];
 }
 
 interface EvaluatedTrade {
@@ -201,7 +203,7 @@ function TradeOfSeasonCard({ label, emoji, et, assets, expandedId, onToggle, sea
 
 // ─── Main Component ───────────────────────────────────────────
 
-export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seasons }: Props) {
+export default function GoodBadUgly({ trades, assets, teams, historicalAdp }: Props) {
   const [expandedTrades, setExpandedTrades] = useState<Set<number>>(new Set());
   const toggleExpanded = (id: number) => {
     setExpandedTrades((prev) => {
@@ -212,17 +214,68 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
     });
   };
   const [selectedSeason, setSelectedSeason] = useState<string>("all");
+  const [selectedManager, setSelectedManager] = useState<string>("all");
   const [activeFilters, setActiveFilters] = useState<Set<VerdictSeverity>>(new Set(VERDICT_ORDER));
   const [tradeTypeFilter, setTradeTypeFilter] = useState<TradeTypeFilter>("all");
+
+  // Mutually exclusive filter handlers
+  const handleSeasonChange = (value: string) => {
+    setSelectedSeason(value);
+    setSelectedManager("all"); // Clear manager when season selected
+  };
+  const handleManagerChange = (value: string) => {
+    setSelectedManager(value);
+    setSelectedSeason("all"); // Clear season when manager selected
+  };
 
   // Season-aware ADP: season → (player_name → adp_rank) — still used for asset value display in expanded cards
   const seasonAdpMap = useMemo(() => buildSeasonAdpMap(historicalAdp), [historicalAdp]);
 
-  // Filter trades by season
-  const filteredTrades = useMemo(
-    () => (selectedSeason === "all" ? trades : trades.filter((t) => t.season === selectedSeason)),
-    [trades, selectedSeason]
+  // Derive display season for each trade using NFL calendar
+  const tradesWithDisplaySeason = useMemo(
+    () => trades.map((t) => ({ trade: t, displaySeason: getCTownDisplaySeason(t.trade_date, t.season) })),
+    [trades]
   );
+
+  // Available seasons (only those with trades, newest first)
+  const availableSeasons = useMemo(() => {
+    const all = getAllCTownSeasons();
+    const present = new Set(tradesWithDisplaySeason.map((t) => t.displaySeason));
+    return all.filter((s) => present.has(s));
+  }, [tradesWithDisplaySeason]);
+
+  // Available managers (unique team names across all trades)
+  const availableManagers = useMemo(() => {
+    const names = new Set<string>();
+    for (const { trade } of tradesWithDisplaySeason) {
+      names.add(trade.team_a_name);
+      names.add(trade.team_b_name);
+      if (trade.team_c_name) names.add(trade.team_c_name);
+    }
+    return Array.from(names).sort();
+  }, [tradesWithDisplaySeason]);
+
+  // Active filter label for display
+  const activeFilterLabel = selectedSeason !== "all"
+    ? `Viewing season ${selectedSeason}`
+    : selectedManager !== "all"
+    ? `Viewing all trades for ${selectedManager}`
+    : null;
+
+  // Filter trades by season OR manager (mutually exclusive)
+  const filteredTrades = useMemo(() => {
+    let result = tradesWithDisplaySeason;
+    if (selectedSeason !== "all") {
+      result = result.filter((t) => t.displaySeason === selectedSeason);
+    } else if (selectedManager !== "all") {
+      result = result.filter((t) =>
+        t.trade.team_a_name === selectedManager ||
+        t.trade.team_b_name === selectedManager ||
+        t.trade.team_c_name === selectedManager
+      );
+    }
+    return result.map((t) => t.trade);
+  }, [tradesWithDisplaySeason, selectedSeason, selectedManager]);
 
   // Apply trade type filter
   const typeFilteredTrades = useMemo(() => {
@@ -352,8 +405,8 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
 
   // Three-team count
   const threeTeamCount = useMemo(
-    () => (selectedSeason === "all" ? trades : trades.filter((t) => t.season === selectedSeason)).filter(isThreeTeamTrade).length,
-    [trades, selectedSeason]
+    () => filteredTrades.filter(isThreeTeamTrade).length,
+    [filteredTrades]
   );
 
   // Manager leaderboard
@@ -407,16 +460,35 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
   return (
     <div className="space-y-5">
 
+      {/* ── Active filter indicator ── */}
+      {activeFilterLabel && (
+        <div className="text-[11px] text-blue-400 bg-blue-500/10 border border-blue-500/20 rounded-lg px-3 py-1.5 font-medium">
+          {activeFilterLabel}
+        </div>
+      )}
+
       {/* ── Controls Row ── */}
       <div className="flex items-center gap-3 flex-wrap">
-        <Select value={selectedSeason} onValueChange={setSelectedSeason}>
+        <Select value={selectedSeason} onValueChange={handleSeasonChange}>
           <SelectTrigger className="h-8 w-32 text-xs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Seasons</SelectItem>
-            {seasons.map((s) => (
+            {availableSeasons.map((s) => (
               <SelectItem key={s} value={s}>{s}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={selectedManager} onValueChange={handleManagerChange}>
+          <SelectTrigger className="h-8 w-44 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Managers</SelectItem>
+            {availableManagers.map((m) => (
+              <SelectItem key={m} value={m}>{m}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -635,13 +707,11 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
                       {/* Phase indicator */}
                       {/* Confidence badge */}
                       {trade.confidence && (
-                        <Badge variant="outline" className={`text-[8px] px-1 py-0 shrink-0 ${
-                          trade.confidence === 'high' ? 'border-emerald-500/30 text-emerald-400' :
-                          trade.confidence === 'low' ? 'border-red-500/30 text-red-400' :
-                          'border-amber-500/30 text-amber-400'
-                        }`}>
-                          {trade.confidence === 'high' ? '✓' : trade.confidence === 'low' ? '?' : '~'}
-                        </Badge>
+                        <ConfidenceTooltip
+                          confidence={trade.confidence}
+                          reasons={trade.confidence_reasons}
+                          className="shrink-0"
+                        />
                       )}
                       {is3Way && displayWinner ? (
                         <span className={`text-[10px] font-bold ml-auto ${colors.text}`}>

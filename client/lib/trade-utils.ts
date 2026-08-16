@@ -117,6 +117,112 @@ export const SEVERITY_COLORS: Record<VerdictSeverity, { bg: string; border: stri
   robbery: { bg: "bg-red-500/10", border: "border-red-500/30", text: "text-red-400", badge: "bg-red-500/20 text-red-400 border-red-500/30" },
 };
 
+// ─── C-Town Season Calendar ─────────────────────────────────
+// Derives the display season label from trade_date using the same NFL calendar
+// the valuation engine uses. A C-Town season (e.g. "2026-27") spans from the
+// Super Bowl of the prior NFL season through the following Super Bowl:
+//   - Post-Super-Bowl offseason → C-Town draft → preseason → NFL regular season
+// Trades after the prior season's Super Bowl belong to the NEXT C-Town season.
+//
+// NFL Week 1 Tuesday dates (same as backfill-trade-verdicts.ts):
+const NFL_WEEK1_TUESDAY_CLIENT: Record<string, string> = {
+  "2018-19": "2018-09-04",
+  "2019-20": "2019-09-03",
+  "2020-21": "2020-09-08",
+  "2021-22": "2021-09-07",
+  "2022-23": "2022-09-06",
+  "2023-24": "2023-09-05",
+  "2024-25": "2024-09-03",
+  "2025-26": "2025-09-02",
+  "2026-27": "2026-09-08", // Projected NFL 2026 Week 1
+};
+
+// Super Bowl Sunday is approximately 22–23 weeks after Week 1 (early February).
+// We use Feb 15 of the following year as a conservative cutoff — trades on or
+// after this date belong to the NEXT C-Town season's offseason.
+const SUPER_BOWL_CUTOFFS: Record<string, string> = {
+  "2018-19": "2019-02-15",
+  "2019-20": "2020-02-15",
+  "2020-21": "2021-02-15",
+  "2021-22": "2022-02-15",
+  "2022-23": "2023-02-15",
+  "2023-24": "2024-02-15",
+  "2024-25": "2025-02-15",
+  "2025-26": "2026-02-15",
+};
+
+// Ordered list of all C-Town seasons (chronological)
+const ALL_CTOWN_SEASONS = [
+  "2018-19", "2019-20", "2020-21", "2021-22",
+  "2022-23", "2023-24", "2024-25", "2025-26", "2026-27",
+];
+
+/**
+ * Derive the C-Town display season from a trade's stored season and date.
+ *
+ * Historical trades use the commissioner-assigned `season` field as-is.
+ * The only adjustment: if a trade's date falls after the Super Bowl cutoff
+ * of its stored season, it belongs to the NEXT C-Town season's offseason.
+ * This handles 2026 trades stored as "2025-26" that should display as "2026-27".
+ *
+ * Returns the stored `season` field as fallback when trade_date is null.
+ */
+export function getCTownDisplaySeason(tradeDate: string | null, storedSeason: string): string {
+  if (!tradeDate) return storedSeason;
+
+  const d = new Date(tradeDate);
+  const tradeDateStr = d.toISOString().slice(0, 10); // YYYY-MM-DD
+
+  // Check if the trade date falls after the Super Bowl cutoff of its stored season.
+  // If so, it belongs to the next season's offseason.
+  const cutoff = SUPER_BOWL_CUTOFFS[storedSeason];
+  if (cutoff && tradeDateStr >= cutoff) {
+    const idx = ALL_CTOWN_SEASONS.indexOf(storedSeason);
+    if (idx >= 0 && idx < ALL_CTOWN_SEASONS.length - 1) {
+      return ALL_CTOWN_SEASONS[idx + 1];
+    }
+  }
+
+  return storedSeason;
+}
+
+/**
+ * Get the full list of C-Town seasons for dropdown display (newest first).
+ */
+export function getAllCTownSeasons(): string[] {
+  return [...ALL_CTOWN_SEASONS].reverse();
+}
+
+/**
+ * Derive the C-Town trade phase detail from trade_date and display season.
+ * This is for informational display only — does not affect valuations.
+ */
+export function getCTownPhaseDetail(tradeDate: string | null, displaySeason: string): string {
+  if (!tradeDate) return "unknown";
+
+  const d = new Date(tradeDate);
+  const tradeDateStr = d.toISOString().slice(0, 10);
+  const week1 = NFL_WEEK1_TUESDAY_CLIENT[displaySeason];
+
+  if (!week1) return "offseason";
+
+  if (tradeDateStr >= week1) return "regular_season";
+
+  // Before NFL regular season — determine offseason sub-phase
+  // C-Town draft typically happens in late August
+  const year = parseInt(displaySeason.split("-")[0], 10);
+  const draftWeekendStart = `${year}-08-20`;
+  const draftWeekendEnd = `${year}-08-28`;
+  const prevSeason = ALL_CTOWN_SEASONS[ALL_CTOWN_SEASONS.indexOf(displaySeason) - 1];
+  const postSBCutoff = prevSeason ? SUPER_BOWL_CUTOFFS[prevSeason] : `${year}-02-15`;
+
+  if (tradeDateStr >= draftWeekendEnd) return "post_draft_preseason";
+  if (tradeDateStr >= draftWeekendStart) return "draft_weekend";
+  if (tradeDateStr >= postSBCutoff) return "postseason_offseason";
+
+  return "offseason";
+}
+
 // ─── Shared Types ────────────────────────────────────────────
 export interface TradeRow {
   id: number;
@@ -146,6 +252,7 @@ export interface TradeRow {
   team_c_total: number | null;
   valuation_complete: boolean | null;
   confidence: string | null;
+  confidence_reasons: string[] | null;
 }
 
 export interface TradeAssetRow {

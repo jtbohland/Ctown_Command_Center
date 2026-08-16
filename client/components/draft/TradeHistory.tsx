@@ -9,6 +9,8 @@ import {
   calcPlayerValue,
   calcPickValue,
   buildValuationFromDb,
+  getCTownDisplaySeason,
+  getAllCTownSeasons,
   SEVERITY_COLORS,
   type TradeRow,
   type TradeAssetRow,
@@ -17,32 +19,18 @@ import {
   type VerdictSeverity,
 } from "@/lib/trade-utils";
 import ThreeTeamTradeDetail from "./ThreeTeamTradeDetail";
-
-// ─── Confidence Badge ─────────────────────────────────────
-function ConfidenceBadge({ confidence }: { confidence?: string | null }) {
-  if (!confidence) return <span className="text-[9px] text-muted-foreground/50">—</span>;
-  const colors = confidence === 'high' ? 'border-emerald-500/30 text-emerald-400'
-    : confidence === 'low' ? 'border-red-500/30 text-red-400'
-    : 'border-amber-500/30 text-amber-400';
-  const icon = confidence === 'high' ? '✓' : confidence === 'low' ? '?' : '~';
-  return (
-    <Badge variant="outline" className={`text-[8px] px-1 py-0 ${colors}`}>
-      {icon} {confidence}
-    </Badge>
-  );
-}
+import { ConfidenceTooltip } from "./ConfidenceTooltip";
 
 interface Props {
   trades: TradeRow[];
   assets: TradeAssetRow[];
   teams: TeamRow[];
   historicalAdp: HistoricalAdpRow[];
-  seasons: string[];
 }
 
 const ITEMS_PER_PAGE = 20;
 
-export default function TradeHistory({ trades, assets, teams, historicalAdp, seasons }: Props) {
+export default function TradeHistory({ trades, assets, teams, historicalAdp }: Props) {
   const [seasonFilter, setSeasonFilter] = useState<string>("all");
   const [page, setPage] = useState(0);
   const [expandedTrade, setExpandedTrade] = useState<number | null>(null);
@@ -50,20 +38,28 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
   // Season-aware ADP: season → (player_name → adp_rank) — still used for asset value display
   const seasonAdpMap = useMemo(() => buildSeasonAdpMap(historicalAdp), [historicalAdp]);
 
-  // Use canonical DB verdicts — no more client-side valuation
+  // Use canonical DB verdicts + derive display season from NFL calendar
   const tradesWithVerdicts = useMemo(() => {
     return trades
       .map((trade) => {
         const valuation = buildValuationFromDb(trade, teams);
         if (!valuation) return null;
-        return { trade, valuation };
+        const displaySeason = getCTownDisplaySeason(trade.trade_date, trade.season);
+        return { trade, valuation, displaySeason };
       })
-      .filter((t): t is { trade: TradeRow; valuation: NonNullable<ReturnType<typeof buildValuationFromDb>> } => t !== null);
+      .filter((t): t is { trade: TradeRow; valuation: NonNullable<ReturnType<typeof buildValuationFromDb>>; displaySeason: string } => t !== null);
   }, [trades, teams]);
+
+  // Derive available seasons from trades (only seasons that have trades)
+  const availableSeasons = useMemo(() => {
+    const all = getAllCTownSeasons(); // newest first
+    const present = new Set(tradesWithVerdicts.map((t) => t.displaySeason));
+    return all.filter((s) => present.has(s));
+  }, [tradesWithVerdicts]);
 
   const filteredTrades = useMemo(() => {
     if (seasonFilter === "all") return tradesWithVerdicts;
-    return tradesWithVerdicts.filter((t) => t.trade.season === seasonFilter);
+    return tradesWithVerdicts.filter((t) => t.displaySeason === seasonFilter);
   }, [tradesWithVerdicts, seasonFilter]);
 
   const pagedTrades = useMemo(
@@ -94,7 +90,7 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Seasons</SelectItem>
-            {seasons.map((s) => (
+            {availableSeasons.map((s) => (
               <SelectItem key={s} value={s}>{s}</SelectItem>
             ))}
           </SelectContent>
@@ -128,7 +124,7 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
 
       {/* Trade Rows */}
       <div className="space-y-1.5">
-        {pagedTrades.map(({ trade, valuation }) => {
+        {pagedTrades.map(({ trade, valuation, displaySeason }) => {
           const severity = valuation.verdict.severity as VerdictSeverity;
           const colors = SEVERITY_COLORS[severity];
           const isExpanded = expandedTrade === trade.id;
@@ -185,11 +181,11 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp, sea
                   {absDiff > 0 ? `${absDiff > 5 ? "+" : ""}${absDiff}%` : "0%"}
                 </span>
 
-                <span className="text-[11px] text-muted-foreground">{trade.season}</span>
+                <span className="text-[11px] text-muted-foreground">{displaySeason}</span>
 
                 {/* Confidence column */}
                 <div className="flex justify-center">
-                  <ConfidenceBadge confidence={trade.confidence} />
+                  <ConfidenceTooltip confidence={trade.confidence} reasons={trade.confidence_reasons} />
                 </div>
               </div>
 
@@ -279,7 +275,7 @@ function ExpandedTradeDetail({
       {trade.confidence && (
         <div className="flex items-center gap-2 mb-3 px-2 py-1.5 bg-muted/30 rounded-lg border border-border/30">
           <span className="text-[10px] font-bold text-muted-foreground">Confidence:</span>
-          <ConfidenceBadge confidence={trade.confidence} />
+          <ConfidenceTooltip confidence={trade.confidence} reasons={trade.confidence_reasons} />
         </div>
       )}
 

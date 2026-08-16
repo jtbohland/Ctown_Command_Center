@@ -141,6 +141,7 @@ export default api({
     const verdictMigrations = [
       "ALTER TABLE ffwr_trades ADD COLUMN IF NOT EXISTS team_c_total NUMERIC",
       "ALTER TABLE ffwr_trades ADD COLUMN IF NOT EXISTS confidence TEXT",
+      "ALTER TABLE ffwr_trades ADD COLUMN IF NOT EXISTS confidence_reasons TEXT[]",
     ];
     for (const sql of verdictMigrations) {
       await ctx.integrations.apps_db.execute(sql, undefined, { label: "Verdict schema migration" });
