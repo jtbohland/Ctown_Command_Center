@@ -296,7 +296,14 @@ export default api({
         return { imported: 0, updated: 0, message: "No rookie players parsed from CSV." };
       }
 
-      // Batch upsert in chunks of 50
+      // Clear existing data for this draft year, then batch insert
+      const targetYear = rows[0].year;
+      await ctx.integrations.apps_db.execute(
+        `DELETE FROM ffwr_rookie_classes WHERE nfl_draft_year = $1`,
+        [targetYear],
+        { label: `Clear existing ${targetYear} rookies before re-import` }
+      );
+
       const CHUNK = 50;
       for (let c = 0; c < rows.length; c += CHUNK) {
         const chunk = rows.slice(c, c + CHUNK);
@@ -310,17 +317,13 @@ export default api({
         }
         await ctx.integrations.apps_db.execute(
           `INSERT INTO ffwr_rookie_classes (nfl_draft_year, overall_pick, player_name, position, age_on_draft_day)
-           VALUES ${values.join(", ")}
-           ON CONFLICT (nfl_draft_year, overall_pick) DO UPDATE SET
-             player_name = EXCLUDED.player_name,
-             position = EXCLUDED.position,
-             age_on_draft_day = COALESCE(EXCLUDED.age_on_draft_day, ffwr_rookie_classes.age_on_draft_day)`,
+           VALUES ${values.join(", ")}`,
           params,
-          { label: `Batch upsert rookies ${c + 1}-${c + chunk.length}` }
+          { label: `Batch insert rookies ${c + 1}-${c + chunk.length}` }
         );
       }
 
-      return { imported: rows.length, updated: 0, message: `Imported ${rows.length} rookies for ${rows[0].year} draft class.` };
+      return { imported: rows.length, updated: 0, message: `Imported ${rows.length} rookies for ${targetYear} draft class (replaced existing).` };
     }
 
     // ── PLAYER/RANKINGS MODE ──
