@@ -22,6 +22,7 @@ export default api({
     imported: z.number(),
     updated: z.number(),
     message: z.string(),
+    warnings: z.array(z.string()).optional(),
   }),
 
   async run(ctx, { csvFile, mode }) {
@@ -348,6 +349,7 @@ export default api({
     // Use canonical shared normalizer
     const normalizeName = normalizePlayerName;
 
+    const warnings: string[] = [];
     let imported = 0;
     let updated = 0;
 
@@ -360,59 +362,109 @@ export default api({
       sos: string | null; age: number | null;
     }> = [];
 
+    // ── FIRST PASS: parse all rows to detect CSV shape ──
+    const parsedRows: Array<{
+      rawName: string; posRaw: string; position: string;
+      parsed: { name: string; team: string; bye: number | null };
+      name: string; nflTeam: string;
+      rawRank: number | null; adpRank: number | null; dynRank: number | null;
+      posRank: number | null; posRankFromCol: number | null;
+      impliedPts: number | null; byeWeek: number | null;
+      tier: number | null; upside: string | null; bust: string | null;
+      sos: string | null; age: number | null;
+    }> = [];
+
     for (let i = 1; i < lines.length; i++) {
       const cols: string[] = parseCsvLine(lines[i]);
       const rawName = cols[nameIdx] || "";
       const posRaw = cols[posIdx] || "";
       if (!rawName || !posRaw) continue;
 
-      // Extract base position (e.g., "WR1" → "WR", "RB2" → "RB")
       const position = posRaw.replace(/[0-9]/g, "").trim();
-      // Skip K and DST — league doesn't use them
       if (!["QB", "RB", "WR", "TE"].includes(position)) continue;
 
-      // Extract positional rank from POS column (e.g., "RB1" → 1, "WR23" → 23)
       const posRankFromCol = parseInt(posRaw.replace(/[^0-9]/g, "")) || null;
-
-      // Parse the player field for name, team, bye — then normalize (strip periods, collapse spaces)
       const parsed = parsePlayerField(rawName);
       const name = normalizeName(parsed.name);
       if (!name) continue;
 
-      // NFL team: prefer parsed from player field, then standalone team column
       const nflTeam = parsed.team !== "FA" ? parsed.team : (teamIdx >= 0 ? (cols[teamIdx] || "FA") : "FA");
-
-      // draft_rank = Rank column (overall consensus order)
-      const draftRank = rankIdx >= 0 ? parseFloat(cols[rankIdx]) || null : null;
-
-      // adp_rank = AVG column (consensus ADP across platforms)
+      const rawRank = rankIdx >= 0 ? parseFloat(cols[rankIdx]) || null : null;
       const adpRank = adpIdx >= 0 ? parseFloat(cols[adpIdx]) || null
         : (rtIdx >= 0 ? parseFloat(cols[rtIdx]) || null : null);
-
       const dynRank = dynIdx >= 0 ? parseFloat(cols[dynIdx]) || null : null;
-
-      // Positional rank: prefer explicit pos_rank column, else extract from POS column
       const posRank = prIdx >= 0 ? (parseFloat(cols[prIdx]) || null) : posRankFromCol;
-
       const impliedPts = ptsIdx >= 0 ? parseFloat(cols[ptsIdx]) || null : null;
-
-      // Bye week: prefer explicit bye column, else parsed from player field
       const byeWeek = byeIdx >= 0 ? (parseInt(cols[byeIdx]) || null) : parsed.bye;
-
       const tier = tierIdx >= 0 ? parseInt(cols[tierIdx]) || null : null;
       const upside = upsideIdx >= 0 ? (cols[upsideIdx] || null) : null;
       const bust = bustIdx >= 0 ? (cols[bustIdx] || null) : null;
       const sos = sosIdx >= 0 ? (cols[sosIdx] || null) : null;
       const age = ageIdx >= 0 ? parseInt(cols[ageIdx]) || null : null;
 
-      batch.push({ name, position, nflTeam, adpRank, dynRank, posRank, impliedPts, byeWeek, draftRank, tier, upside, bust, sos, age });
+      parsedRows.push({ rawName, posRaw, position, parsed, name, nflTeam, rawRank, adpRank, dynRank, posRank, posRankFromCol, impliedPts, byeWeek, tier, upside, bust, sos, age });
+    }
+
+    // ── DETECT CSV SHAPE: mixed (overall) vs positional ──
+    // If >75% of rows share a single position, treat RANK column as positional, not overall
+    const posCounts: Record<string, number> = {};
+    for (const r of parsedRows) {
+      posCounts[r.position] = (posCounts[r.position] ?? 0) + 1;
+    }
+    const maxPosCount = Math.max(...Object.values(posCounts), 0);
+    const isPositionalCsv = parsedRows.length > 0 && (maxPosCount / parsedRows.length) > 0.75;
+    const hasAdpColumn = adpIdx >= 0 || rtIdx >= 0;
+
+    // If CSV has an ADP/AVG column, the rank column is the overall consensus order.
+    // If CSV has NO ADP column AND it's positional, the rank column is positional rank.
+    // If CSV has NO ADP column AND it's mixed, the rank column is draft_rank.
+    const rankIsOverall = hasAdpColumn || !isPositionalCsv;
+
+    if (isPositionalCsv && rankIdx >= 0 && !hasAdpColumn) {
+      const dominantPos = Object.entries(posCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
+      warnings.push(`CSV appears to be a ${dominantPos}-only ranking (${maxPosCount}/${parsedRows.length} rows). Rank column treated as positional rank, NOT overall draft rank.`);
+    }
+
+    // ── DUPLICATE DETECTION within CSV ──
+    const nameKeys = new Map<string, number>();
+    for (const r of parsedRows) {
+      const key = `${r.name.toLowerCase()}|${r.position}`;
+      nameKeys.set(key, (nameKeys.get(key) ?? 0) + 1);
+    }
+    const dupsInCsv = [...nameKeys.entries()].filter(([_, cnt]) => cnt > 1);
+    if (dupsInCsv.length > 0) {
+      const dupNames = dupsInCsv.map(([k, cnt]) => `${k.split("|")[0]} (${cnt}x)`).slice(0, 10);
+      warnings.push(`Duplicate names in CSV: ${dupNames.join(", ")}`);
+    }
+
+    // ── BUILD BATCH with correct draft_rank logic ──
+    for (const r of parsedRows) {
+      let draftRank: number | null = null;
+      let posRank = r.posRank;
+
+      if (rankIsOverall) {
+        // Rank column = overall consensus order → write as draft_rank
+        draftRank = r.rawRank;
+      } else {
+        // Rank column = positional rank → write as positional_rank, NOT draft_rank
+        if (r.rawRank != null && posRank == null) {
+          posRank = r.rawRank;
+        }
+      }
+
+      batch.push({
+        name: r.name, position: r.position, nflTeam: r.nflTeam,
+        adpRank: r.adpRank, dynRank: r.dynRank, posRank,
+        impliedPts: r.impliedPts, byeWeek: r.byeWeek, draftRank,
+        tier: r.tier, upside: r.upside, bust: r.bust,
+        sos: r.sos, age: r.age,
+      });
     }
 
     // Diagnostic: column detection results
-    const colInfo = `cols: name=${nameIdx} pos=${posIdx} rank=${rankIdx} adp=${adpIdx} team=${teamIdx} bye=${byeIdx} rt=${rtIdx} | lines=${lines.length} batch=${batch.length}`;
+    const colInfo = `cols: name=${nameIdx} pos=${posIdx} rank=${rankIdx} adp=${adpIdx} team=${teamIdx} bye=${byeIdx} rt=${rtIdx} | lines=${lines.length} batch=${batch.length} | rankIsOverall=${rankIsOverall}`;
 
     if (batch.length === 0) {
-      // Debug: show first data row to help diagnose
       const sampleCols = lines.length > 1 ? parseCsvLine(lines[1]) : [];
       const samplePosRaw = posIdx >= 0 ? sampleCols[posIdx] : "N/A";
       const sampleNameRaw = nameIdx >= 0 ? sampleCols[nameIdx] : "N/A";
@@ -420,7 +472,35 @@ export default api({
         imported: 0,
         updated: 0,
         message: `No players parsed from CSV. ${colInfo} | sample name="${sampleNameRaw}" pos="${samplePosRaw}" | headers: ${header.join(", ")}`,
+        warnings,
       };
+    }
+
+    // ── NAME-MATCH VALIDATION: check how many names match existing players ──
+    const existingPlayers = await ctx.integrations.apps_db.query(
+      `SELECT LOWER(REPLACE(REPLACE(name, '.', ''), ' ', '')) AS norm_name, position FROM ffwr_players`,
+      z.object({ norm_name: z.string(), position: z.string() }),
+      undefined,
+      { label: "Load existing player names for match validation" }
+    );
+    const existingSet = new Set(existingPlayers.map(p => `${p.norm_name}|${p.position}`));
+
+    let matched = 0;
+    let newPlayers = 0;
+    const unmatchedNames: string[] = [];
+    for (const r of batch) {
+      const normKey = `${r.name.toLowerCase().replace(/[. ]/g, "")}|${r.position}`;
+      if (existingSet.has(normKey)) {
+        matched++;
+      } else {
+        newPlayers++;
+        if (unmatchedNames.length < 15) {
+          unmatchedNames.push(`${r.name} (${r.position})`);
+        }
+      }
+    }
+    if (newPlayers > 0) {
+      warnings.push(`${newPlayers} new player(s) not in DB will be inserted: ${unmatchedNames.join(", ")}${newPlayers > 15 ? ` ...and ${newPlayers - 15} more` : ""}`);
     }
 
     // Batch upsert in chunks of 25 (14 params per row × 25 = 350 params)
@@ -461,8 +541,9 @@ export default api({
 
     return {
       imported,
-      updated: 0,
-      message: `Processed ${imported} players. ${colInfo}`,
+      updated: matched,
+      message: `Processed ${imported} players (${matched} matched existing, ${newPlayers} new). ${colInfo}`,
+      warnings: warnings.length > 0 ? warnings : undefined,
     };
   },
 });

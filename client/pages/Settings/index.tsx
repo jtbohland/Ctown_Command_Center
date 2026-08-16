@@ -54,7 +54,13 @@ export default function SettingsPage() {
         csvFile: { files: [selectedFile] },
         mode: uploadMode,
       } as any);
-      toast.success(result?.message ?? "Players imported!");
+      const msg = result?.message ?? "Players imported!";
+      const warns = (result as any)?.warnings as string[] | undefined;
+      if (warns && warns.length > 0) {
+        toast.warning(msg + "\n⚠️ " + warns.join("\n⚠️ "), { duration: 8000 });
+      } else {
+        toast.success(msg);
+      }
       setSelectedFile(null);
       await queryClient.invalidateQueries("GetPlayers");
     } catch (error) {
@@ -64,7 +70,7 @@ export default function SettingsPage() {
           : String(error);
       toast.error("Upload failed: " + message);
     }
-  }, [selectedFile, uploadPlayers]);
+  }, [selectedFile, uploadPlayers, uploadMode]);
 
   const handleInit = useCallback(async () => {
     try {
