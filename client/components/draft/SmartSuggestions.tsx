@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Icon } from "@/components/ui/icon";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import PositionBadge from "./PositionBadge";
-import { getTagEmoji, getPlayerSos, getPlayerVegas, getRookieStarDisplay, STARTING_SLOTS, type Player, type Team } from "@/lib/draft-constants";
+import { getTagEmoji, getPlayerSos, getPlayerVegas, getRookieStarDisplay, getKeeperWindow, STARTING_SLOTS, type Player, type Team, type KeeperWindow } from "@/lib/draft-constants";
 import RatingBars, { parseRatingString } from "./RatingBars";
 import { VegasBar } from "./VegasBar";
 import FallingBoard from "./FallingBoard";
@@ -18,16 +18,17 @@ type SmartSuggestionsProps = {
 };
 
 type ScoreBreakdown = {
-  adpPct: number;        // 0–35
-  dynastyPts: number;    // 0–15
-  posRankPts: number;    // 0–10
-  needPts: number;       // 0–15
-  valuePts: number;      // 0–5
-  vegasPts: number;      // 0–3
-  sosPts: number;        // 0–2
-  tagPts: number;        // 0–10
-  byePenalty: number;    // -5–0
-  avoidPenalty: number;  // -25 or 0
+  adpPct: number;           // 0–35
+  dynastyPts: number;       // 0–10 (was 15, 5 moved to keeper window)
+  posRankPts: number;       // 0–10
+  needPts: number;          // 0–15
+  valuePts: number;         // 0–5
+  vegasPts: number;         // 0–3
+  sosPts: number;           // 0–2
+  tagPts: number;           // 0–10
+  keeperWindowPts: number;  // 0–8
+  byePenalty: number;       // -5–0
+  avoidPenalty: number;     // -25 or 0
 };
 
 type ScoredPlayer = Player & {
@@ -36,6 +37,7 @@ type ScoredPlayer = Player & {
   reasons: string[];
   byeConflict: ByeConflict | null;
   sosScore: number | null;
+  keeperWindow: KeeperWindow | null;
 };
 
 type ByeConflict = {
@@ -137,18 +139,18 @@ function computeAllScored(
     const adpPercentile = 1 - (adpPosition / totalAvailable); // 1 = best, 0 = worst
     const adpPct = Math.round(adpPercentile * 35 * 10) / 10;
 
-    // Dynasty Rank (0–15 pts)
-    // Top 10 dynasty = 15, top 25 = 12, top 50 = 8, top 100 = 4, else = 0
+    // Dynasty Rank (0–10 pts, reduced from 15 — 5 pts moved to Keeper Window)
+    // Top 10 dynasty = 10, top 25 = 8, top 50 = 5, top 100 = 3, else = 0
     let dynastyPts = 0;
     if (dynRank <= 10) {
-      dynastyPts = 15;
+      dynastyPts = 10;
       reasons.push("👑 Dynasty elite");
     } else if (dynRank <= 25) {
-      dynastyPts = 12;
-    } else if (dynRank <= 50) {
       dynastyPts = 8;
+    } else if (dynRank <= 50) {
+      dynastyPts = 5;
     } else if (dynRank <= 100) {
-      dynastyPts = 4;
+      dynastyPts = 3;
     }
 
     // Positional Rank (0–10 pts)
@@ -261,6 +263,18 @@ function computeAllScored(
       reasons.unshift("🚫 Avoid");
     }
 
+    // ── KEEPER WINDOW: dynasty shelf-life (0–8 pts) ──
+    const keeperWindow = getKeeperWindow(player.position, player.age);
+    let keeperWindowPts = 0;
+    if (keeperWindow) {
+      keeperWindowPts = keeperWindow.points;
+      if (keeperWindow.tier === "long" && (player.position === "RB" || player.position === "WR")) {
+        reasons.push(`${keeperWindow.emoji} ${keeperWindow.label}`);
+      } else if (keeperWindow.tier === "short") {
+        reasons.push(`${keeperWindow.emoji} ${keeperWindow.label}`);
+      }
+    }
+
     // ── TIEBREAKERS: bye penalties (−5 to 0) ──
     let byePenalty = 0;
     const byeConflict = getByeConflict(player, byeMap);
@@ -272,6 +286,7 @@ function computeAllScored(
     const totalScore =
       adpPct + dynastyPts + posRankPts +  // Expert consensus
       needPts + valuePts + vegasPts + sosPts +  // Contextual fit
+      keeperWindowPts +  // Dynasty shelf-life
       tagPts +  // Tags
       byePenalty + avoidPenalty;  // Penalties
 
@@ -286,11 +301,12 @@ function computeAllScored(
       vegasPts,
       sosPts,
       tagPts,
+      keeperWindowPts,
       byePenalty,
       avoidPenalty,
     };
 
-    return { ...player, score, breakdown, reasons, byeConflict, sosScore };
+    return { ...player, score, breakdown, reasons, byeConflict, sosScore, keeperWindow };
   });
 
   scored.sort((a, b) => b.score - a.score);
@@ -307,11 +323,11 @@ const ScoreBreakdownView = memo(function ScoreBreakdownView({ b }: { b: ScoreBre
     <div className="text-[9px] leading-tight space-y-1 min-w-[140px]">
       <div className="font-bold text-foreground/80 border-b border-border/30 pb-0.5 mb-0.5">Score Breakdown</div>
       <div className="flex justify-between">
-        <span className="text-muted-foreground">Expert ({expertTotal.toFixed(1)}/60)</span>
+        <span className="text-muted-foreground">Expert ({expertTotal.toFixed(1)}/55)</span>
       </div>
       <div className="pl-2 space-y-0.5 text-muted-foreground/70">
         <div className="flex justify-between"><span>ADP Percentile</span><span>{b.adpPct.toFixed(1)}/35</span></div>
-        <div className="flex justify-between"><span>Dynasty Rank</span><span>{b.dynastyPts}/15</span></div>
+        <div className="flex justify-between"><span>Dynasty Rank</span><span>{b.dynastyPts}/10</span></div>
         <div className="flex justify-between"><span>Positional Rank</span><span>{b.posRankPts}/10</span></div>
       </div>
       <div className="flex justify-between">
@@ -322,6 +338,15 @@ const ScoreBreakdownView = memo(function ScoreBreakdownView({ b }: { b: ScoreBre
         <div className="flex justify-between"><span>Value/Fallen</span><span>{b.valuePts}/5</span></div>
         <div className="flex justify-between"><span>Vegas</span><span>{b.vegasPts}/3</span></div>
         <div className="flex justify-between"><span>SOS</span><span>{b.sosPts}/2</span></div>
+      </div>
+      <div className="flex justify-between">
+        <span className="text-muted-foreground">Keeper Window ({b.keeperWindowPts}/8)</span>
+      </div>
+      <div className="pl-2 space-y-0.5 text-muted-foreground/70">
+        <div className="flex justify-between">
+          <span>{b.keeperWindowPts >= 5 ? "🪟 Long" : b.keeperWindowPts >= 2 ? "🖼️ Closing" : b.keeperWindowPts > 0 ? "🪟 Stable" : "🚪 Short"}</span>
+          <span>{b.keeperWindowPts}/8</span>
+        </div>
       </div>
       {b.tagPts > 0 && (
         <div className="flex justify-between"><span className="text-muted-foreground">Tags</span><span>{b.tagPts}/10</span></div>
@@ -385,6 +410,15 @@ const SuggestionCard = memo(function SuggestionCard({
         >
           {player.score.toFixed(1)}
         </button>
+        {/* Keeper Window badge */}
+        {player.keeperWindow && (
+          <span
+            className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${player.keeperWindow.bgClass}`}
+            title={`${player.keeperWindow.label} — ${player.keeperWindow.points}/8 pts`}
+          >
+            {player.keeperWindow.emoji} {player.keeperWindow.label}
+          </span>
+        )}
         {/* ADP fallen chip */}
         {adpGap >= 8 && (
           <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold tabular-nums border ${
@@ -534,6 +568,15 @@ const AllPlayersRow = memo(function AllPlayersRow({
       {player.dynasty_rank == null || player.dynasty_rank > 100 ? (
         <span className="text-[10px] text-muted-foreground/30 shrink-0 w-12 text-right">—</span>
       ) : null}
+      {/* Keeper Window mini-badge */}
+      {player.keeperWindow && (
+        <span
+          className={`shrink-0 rounded-full border px-1 py-0 text-[9px] font-semibold ${player.keeperWindow.bgClass}`}
+          title={`${player.keeperWindow.label} — ${player.keeperWindow.points}/8 pts`}
+        >
+          {player.keeperWindow.emoji}
+        </span>
+      )}
       <span className="text-[10px] text-primary/60 font-medium truncate max-w-[180px] shrink-0">
         {player.reasons[0] || ""}
       </span>
@@ -652,7 +695,7 @@ export default function SmartSuggestions({ players, myTeam, isMyPick, currentOve
           Pick #{currentOverallPick}
         </span>
         <span className="text-[9px] text-muted-foreground/60 ml-1">
-          60 expert · 25 fit · 10 tags · 5 tiebreak
+          55 expert · 25 fit · 8 keeper · 10 tags · 5 tiebreak
         </span>
 
         {/* View Mode toggle */}

@@ -619,6 +619,13 @@ function TradeSidePanel({
                   ? `${asset.pickYear} Rd ${asset.pickRound} (#${asset.pickNumber})`
                   : `${asset.pickYear} Rd ${asset.pickRound}`}
             </span>
+            <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+              ({Math.round(
+                asset.type === "player"
+                  ? (asset.playerAdp ? calcPlayerValue(asset.playerAdp) : 0)
+                  : calcPickValue(asset.pickRound ?? 6, asset.pickYear ?? 2026, asset.pickNumber ?? undefined)
+              ).toLocaleString()})
+            </span>
             {/* Recipient selector for 3-team mode */}
             {showRecipient && sideLabels && onSetRecipient && (
               <Select

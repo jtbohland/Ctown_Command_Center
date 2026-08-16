@@ -6,6 +6,7 @@ import {
   getSeasonAdp,
   calcPlayerValue,
   calcPickValue,
+  seasonToDraftYear,
   SEVERITY_COLORS,
   type TradeRow,
   type TradeAssetRow,
@@ -35,7 +36,8 @@ function getAssetValue(
   }
   const year = a.pick_year ?? 2026;
   const round = a.pick_round ?? 6;
-  return calcPickValue(round, year, a.pick_number ?? undefined);
+  const refYear = seasonToDraftYear(tradeSeason);
+  return calcPickValue(round, year, a.pick_number ?? undefined, refYear);
 }
 
 // ─── Asset Row ───────────────────────────────────────────────

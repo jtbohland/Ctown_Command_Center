@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Icon } from "@/components/ui/icon";
 import { Textarea } from "@/components/ui/textarea";
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
-import type { TeamRow, PlayerRow, DraftCapitalRow } from "@/lib/trade-utils";
+import { calcPlayerValue, calcPickValue, type TeamRow, type PlayerRow, type DraftCapitalRow } from "@/lib/trade-utils";
 import { formatDropdownLabel } from "@/lib/player-values";
 
 /** Fixed future seasons for Siren Sale — no backlog, future trades only */
@@ -550,6 +550,13 @@ function AssetPanel({
               <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0 bg-amber-500/10 border-amber-500/30 text-amber-400">📋</Badge>
             )}
             <span className="flex-1 truncate">{a.type === "player" ? a.playerName : a.pickNumber ? `${a.pickYear} Rd ${a.pickRound} (#${a.pickNumber})` : `${a.pickYear} Rd ${a.pickRound}`}</span>
+            <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+              ({Math.round(
+                a.type === "player"
+                  ? (() => { const p = players.find((p) => p.name === a.playerName); return p?.adp_rank ? calcPlayerValue(p.adp_rank) : 0; })()
+                  : calcPickValue(a.pickRound ?? 6, a.pickYear ?? 2026, a.pickNumber ?? undefined)
+              ).toLocaleString()})
+            </span>
 
             {/* Recipient dropdown for 3-team mode */}
             {showRecipient && (

@@ -52,11 +52,30 @@ function getKeeperOffset(year: number): number {
 import { normalizeName, extractKeeperRightsPlayer, getCanonicalDisplayName } from "./normalize-trade-name";
 export { normalizeName, extractKeeperRightsPlayer, getCanonicalDisplayName };
 
-const YEAR_DISCOUNT: Record<number, number> = {
-  2026: 1.0,
-  2027: 0.8,
-  2028: 0.65,
+// ─── Future Pick Discount (relative years ahead) ────────────
+const FUTURE_PICK_DISCOUNT: Record<number, number> = {
+  0: 1.00,  // same draft year
+  1: 0.80,  // one year ahead
+  2: 0.65,  // two years ahead
 };
+const DEFAULT_FUTURE_DISCOUNT = 0.50;
+
+export const CURRENT_DRAFT_YEAR = 2026;
+
+/** Convert season string like "2024-25" to the draft year (2025). */
+export function seasonToDraftYear(season: string): number {
+  const parts = season.split("-");
+  if (parts.length === 2 && parts[1].length === 2) {
+    const prefix = parts[0].substring(0, 2);
+    return parseInt(prefix + parts[1], 10);
+  }
+  return parseInt(parts[0], 10) || CURRENT_DRAFT_YEAR;
+}
+
+function getFuturePickDiscount(pickYear: number, referenceDraftYear: number): number {
+  const yearsAhead = Math.max(0, pickYear - referenceDraftYear);
+  return FUTURE_PICK_DISCOUNT[yearsAhead] ?? DEFAULT_FUTURE_DISCOUNT;
+}
 
 // ─── Dynasty Multiplier Constants ────────────────────────────
 const ROOKIE_MAX_PICK = 128;
@@ -82,7 +101,12 @@ export function calcPlayerValue(adpRank: number): number {
   return BASE_VALUE * Math.pow(1 / adpRank, POWER);
 }
 
-export function calcPickValue(round: number, year: number, pickInRound?: number): number {
+export function calcPickValue(
+  round: number,
+  year: number,
+  pickInRound?: number,
+  referenceYear: number = CURRENT_DRAFT_YEAR,
+): number {
   const leagueSize = getLeagueSize(year);
   const startOfRound = (round - 1) * leagueSize + 1;
   const endOfRound = round * leagueSize;
@@ -90,7 +114,7 @@ export function calcPickValue(round: number, year: number, pickInRound?: number)
     ? startOfRound + pickInRound - 1
     : (startOfRound + endOfRound) / 2;
   const effectiveAdp = draftPosition + getKeeperOffset(year);
-  const discount = YEAR_DISCOUNT[year] ?? 0.5;
+  const discount = getFuturePickDiscount(year, referenceYear);
   return calcPlayerValue(effectiveAdp) * discount;
 }
 
@@ -797,7 +821,8 @@ export function evaluateHistoricalTrade(
         const year = a.pick_year;
         const round = a.pick_round ?? 6;
         if (year === null || year === undefined) return sum;
-        return sum + calcPickValue(round, year, a.pick_number ?? undefined);
+        const refYear = seasonToDraftYear(trade.season);
+        return sum + calcPickValue(round, year, a.pick_number ?? undefined, refYear);
       }
     }, 0);
   }
@@ -893,7 +918,8 @@ function computeAssetValue(
   const year = a.pick_year;
   const round = a.pick_round ?? 6;
   if (year === null || year === undefined) return 0;
-  return calcPickValue(round, year, a.pick_number ?? undefined);
+  const refYear = seasonToDraftYear(tradeSeason);
+  return calcPickValue(round, year, a.pick_number ?? undefined, refYear);
 }
 
 /**

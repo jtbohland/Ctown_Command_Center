@@ -3,6 +3,7 @@ import { Outlet } from "react-router";
 import { App as AppProvider } from "@superblocksteam/library";
 
 import { Toaster } from "./components/common/sonner";
+import FantasyWiz from "./components/FantasyWiz";
 
 export default function AppComponent() {
   return (
@@ -12,6 +13,7 @@ export default function AppComponent() {
         <Outlet />
       </AppProvider>
       <Toaster />
+      <FantasyWiz />
     </>
   );
 }
