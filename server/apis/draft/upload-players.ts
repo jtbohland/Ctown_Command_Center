@@ -313,7 +313,7 @@ export default api({
           const r = chunk[j];
           const offset = j * 5;
           values.push(`($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5})`);
-          params.push(r.year, r.pick, r.name, r.pos, r.age);
+          params.push(r.year, r.pick, r.name, r.pos, r.age ?? 0);
         }
         await ctx.integrations.apps_db.execute(
           `INSERT INTO ffwr_rookie_classes (nfl_draft_year, overall_pick, player_name, position, age_on_draft_day)
