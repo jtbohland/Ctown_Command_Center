@@ -1,13 +1,11 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
+import { getTeamEmoji } from "@/lib/draft-constants";
 import {
   isThreeTeamTrade,
   buildSeasonAdpMap,
-  getSeasonAdp,
-  calcPlayerValue,
-  calcPickValue,
   buildValuationFromDb,
   getCTownDisplaySeason,
   getAllCTownSeasons,
@@ -21,6 +19,7 @@ import {
   type ThreeTeamValuation,
 } from "@/lib/trade-utils";
 import ThreeTeamTradeDetail from "./ThreeTeamTradeDetail";
+import TwoWayTradeDetail from "./TwoWayTradeDetail";
 import { ConfidenceTooltip } from "./ConfidenceTooltip";
 
 interface Props {
@@ -48,47 +47,6 @@ const VERDICT_META: Record<VerdictSeverity, { title: string; emoji: string; desc
 };
 
 // ─── Small sub-components ─────────────────────────────────────
-
-function getAssetValue(a: TradeAssetRow, tradeSeason: string, seasonAdpMap: Map<string, Map<string, number>>): number {
-  if (a.asset_type === "player") {
-    const adp = a.player_adp_at_trade
-      ? Number(a.player_adp_at_trade)
-      : getSeasonAdp(seasonAdpMap, tradeSeason, a.player_name ?? "");
-    return adp ? calcPlayerValue(adp) : 0;
-  }
-  const year = a.pick_year ?? 2026;
-  const round = a.pick_round ?? 6;
-  return calcPickValue(round, year, a.pick_number ?? undefined);
-}
-
-function AssetWithValue({ a, tradeSeason, seasonAdpMap }: { a: TradeAssetRow; tradeSeason: string; seasonAdpMap: Map<string, Map<string, number>> }) {
-  const val = getAssetValue(a, tradeSeason, seasonAdpMap);
-  return (
-    <div className="flex items-center gap-1.5 pl-1 py-0.5 text-xs">
-      {a.asset_type === "player" ? (
-        <Badge className={`text-[9px] px-1 py-0 ${POSITION_BG_CLASSES[a.player_position ?? ""] ?? "bg-muted"}`}>
-          {a.player_position}
-        </Badge>
-      ) : (
-        <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/10 border-amber-500/30 text-amber-400">📋</Badge>
-      )}
-      <span className="truncate flex-1">
-        {a.asset_type === "player"
-          ? a.player_name
-          : formatPickDisplay(a)}
-      </span>
-      <span className="text-[10px] font-mono text-muted-foreground shrink-0">({Math.round(val).toLocaleString()})</span>
-    </div>
-  );
-}
-
-function formatPickDisplay(a: TradeAssetRow): string {
-  const parts: string[] = [];
-  if (a.pick_year) parts.push(String(a.pick_year));
-  if (a.pick_round) parts.push(`Rd ${a.pick_round}`);
-  if (a.pick_number) parts.push(`#${a.pick_number}`);
-  return parts.length > 0 ? parts.join(" ") : "Draft Pick";
-}
 
 // ─── Trade of the Season card ─────────────────────────────────
 
@@ -166,36 +124,16 @@ function TradeOfSeasonCard({ label, emoji, et, assets, expandedId, onToggle, sea
       </div>
       {/* Expanded detail */}
       {isExpanded && (
-        <div className={`border-t ${colors.border} px-3 py-3`}>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <div className={`text-[10px] font-bold ${colors.text} mb-1`}>
-                {getTeamEmoji(trade.team_a_name)} {trade.team_a_name} sends
-                <span className="font-mono ml-1 text-muted-foreground">{Math.round(valuation.teamAValue).toLocaleString()} pts</span>
-              </div>
-              {teamAAssets.map((a) => <AssetWithValue key={a.id} a={a} tradeSeason={trade.season} seasonAdpMap={seasonAdpMap} />)}
-              <div className="mt-1.5 pt-1 border-t border-border/30 flex items-center justify-between">
-                <span className="text-[10px] font-bold text-muted-foreground">Package Total</span>
-                <span className="text-xs font-bold font-mono">{Math.round(valuation.teamAValue).toLocaleString()} pts</span>
-              </div>
-            </div>
-            <div>
-              <div className={`text-[10px] font-bold ${colors.text} mb-1`}>
-                {getTeamEmoji(trade.team_b_name)} {trade.team_b_name} sends
-              </div>
-              {teamBAssets.map((a) => <AssetWithValue key={a.id} a={a} tradeSeason={trade.season} seasonAdpMap={seasonAdpMap} />)}
-              <div className="mt-1.5 pt-1 border-t border-border/30 flex items-center justify-between">
-                <span className="text-[10px] font-bold text-muted-foreground">Package Total</span>
-                <span className="text-xs font-bold font-mono">{Math.round(valuation.teamBValue).toLocaleString()} pts</span>
-              </div>
-            </div>
-          </div>
-          {valuation.winningTeamName && (
-            <div className={`mt-2 text-center text-[10px] font-extrabold ${colors.text} tracking-widest uppercase`}>
-              🏆 Winner: {valuation.winningTeamName}
-            </div>
-          )}
-        </div>
+        <TwoWayTradeDetail
+          trade={trade}
+          assets={assets}
+          valuation={valuation}
+          seasonAdpMap={seasonAdpMap}
+          colorClass={colors.text}
+          borderClass={colors.border}
+          bgClass=""
+          showConfidence={false}
+        />
       )}
     </div>
   );
@@ -215,6 +153,7 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp }: Pr
   };
   const [selectedSeason, setSelectedSeason] = useState<string>("all");
   const [selectedManager, setSelectedManager] = useState<string>("all");
+  const [playerSearch, setPlayerSearch] = useState("");
   const [activeFilters, setActiveFilters] = useState<Set<VerdictSeverity>>(new Set(VERDICT_ORDER));
   const [tradeTypeFilter, setTradeTypeFilter] = useState<TradeTypeFilter>("all");
 
@@ -262,7 +201,11 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp }: Pr
     ? `Viewing all trades for ${selectedManager}`
     : null;
 
-  // Filter trades by season OR manager (mutually exclusive)
+  const handlePlayerSearch = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setPlayerSearch(e.target.value);
+  }, []);
+
+  // Filter trades by season OR manager (mutually exclusive) + player search
   const filteredTrades = useMemo(() => {
     let result = tradesWithDisplaySeason;
     if (selectedSeason !== "all") {
@@ -274,8 +217,17 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp }: Pr
         t.trade.team_c_name === selectedManager
       );
     }
+    if (playerSearch.trim()) {
+      const q = playerSearch.trim().toLowerCase();
+      const matchingTradeIds = new Set(
+        assets
+          .filter((a) => a.asset_type === "player" && a.player_name?.toLowerCase().includes(q))
+          .map((a) => a.trade_id)
+      );
+      result = result.filter((t) => matchingTradeIds.has(t.trade.id));
+    }
     return result.map((t) => t.trade);
-  }, [tradesWithDisplaySeason, selectedSeason, selectedManager]);
+  }, [tradesWithDisplaySeason, selectedSeason, selectedManager, playerSearch, assets]);
 
   // Apply trade type filter
   const typeFilteredTrades = useMemo(() => {
@@ -469,6 +421,12 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp }: Pr
 
       {/* ── Controls Row ── */}
       <div className="flex items-center gap-3 flex-wrap">
+        <Input
+          value={playerSearch}
+          onChange={handlePlayerSearch}
+          placeholder="\ud83d\udd0d Search player name\u2026"
+          className="h-8 w-44 text-xs"
+        />
         <Select value={selectedSeason} onValueChange={handleSeasonChange}>
           <SelectTrigger className="h-8 w-32 text-xs">
             <SelectValue />
@@ -738,63 +696,16 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp }: Pr
                             teams={teams}
                           />
                         ) : (
-                          <>
-                            <div className="grid grid-cols-2 gap-4 text-xs">
-                              <div>
-                                <div className={`text-[10px] font-bold ${colors.text} mb-1`}>
-                                  {getTeamEmoji(trade.team_a_name)} {trade.team_a_name} sends →
-                                </div>
-                                {teamAAssets.map((a) => <AssetWithValue key={a.id} a={a} tradeSeason={trade.season} seasonAdpMap={seasonAdpMap} />)}
-                                <div className="mt-1.5 pt-1 border-t border-border/30 flex items-center justify-between">
-                                  <span className="text-[10px] font-bold text-muted-foreground">Package Total</span>
-                                  <span className="text-xs font-bold font-mono">{Math.round(valuation.teamAValue).toLocaleString()} pts</span>
-                                </div>
-                                {valuation.winningTeamId === trade.team_a_id && (
-                                  <Badge className="text-[9px] px-1.5 py-0 bg-emerald-500/20 text-emerald-400 border-emerald-500/30 border mt-1.5 w-fit">WINNER</Badge>
-                                )}
-                              </div>
-                              <div>
-                                <div className={`text-[10px] font-bold ${colors.text} mb-1`}>
-                                  {getTeamEmoji(trade.team_b_name)} {trade.team_b_name} sends →
-                                </div>
-                                {teamBAssets.map((a) => <AssetWithValue key={a.id} a={a} tradeSeason={trade.season} seasonAdpMap={seasonAdpMap} />)}
-                                <div className="mt-1.5 pt-1 border-t border-border/30 flex items-center justify-between">
-                                  <span className="text-[10px] font-bold text-muted-foreground">Package Total</span>
-                                  <span className="text-xs font-bold font-mono">{Math.round(valuation.teamBValue).toLocaleString()} pts</span>
-                                </div>
-                                {valuation.winningTeamId === trade.team_b_id && (
-                                  <Badge className="text-[9px] px-1.5 py-0 bg-emerald-500/20 text-emerald-400 border-emerald-500/30 border mt-1.5 w-fit">WINNER</Badge>
-                                )}
-                              </div>
-                            </div>
-                            {valuation.winningTeamName && (
-                              <div className={`mt-3 pt-2 border-t border-border/30 text-center space-y-1`}>
-                                <div className="text-[11px] font-bold">
-                                  {getTeamEmoji(valuation.winningTeamName)} <span className="text-emerald-400">{valuation.winningTeamName}</span>
-                                  <span className="text-muted-foreground"> receives </span>
-                                  <span className="font-mono text-emerald-400">+{Math.round(valuation.absoluteValueGap).toLocaleString()}</span>
-                                  <span className="text-muted-foreground"> more value</span>
-                                </div>
-                                <div className="flex items-center justify-center gap-2">
-                                  <span className="text-[9px] font-mono text-muted-foreground bg-muted/30 rounded px-1.5 py-0.5">
-                                    {Math.abs(valuation.pctDifference)}% gap
-                                  </span>
-                                  <span className="text-[9px] font-mono text-muted-foreground bg-muted/30 rounded px-1.5 py-0.5">
-                                    Trade size: {Math.round(valuation.tradeSize).toLocaleString()}
-                                  </span>
-                                  {valuation.loserLossPercentage > 0 && (
-                                    <span className={`text-[9px] font-mono rounded px-1.5 py-0.5 ${
-                                      valuation.loserLossPercentage >= 25 ? "bg-red-500/15 text-red-400" :
-                                      valuation.loserLossPercentage >= 10 ? "bg-amber-500/15 text-amber-400" :
-                                      "bg-muted/30 text-muted-foreground"
-                                    }`}>
-                                      Overpaid: {valuation.loserLossPercentage}%
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                          </>
+                          <TwoWayTradeDetail
+                            trade={trade}
+                            assets={assets}
+                            valuation={valuation}
+                            seasonAdpMap={seasonAdpMap}
+                            colorClass={colors.text}
+                            borderClass="border-transparent"
+                            bgClass=""
+                            showConfidence
+                          />
                         )}
                       </div>
                     )}

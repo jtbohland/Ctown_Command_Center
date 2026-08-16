@@ -36,11 +36,18 @@ function calcPickValue(round: number, year: number, pickInRound?: number): numbe
   return calcPlayerValue(effectiveAdp);
 }
 
-// Client-side YEAR_DISCOUNT (from trade-utils.ts) — no future-pick discounting
-const CLIENT_YEAR_DISCOUNT: Record<number, number> = {
-  2026: 1.0, 2027: 0.8, 2028: 0.65,
+// Future pick discount — relative years (matches canonical engine)
+const FUTURE_PICK_DISCOUNT: Record<number, number> = {
+  0: 1.00,  // same draft year
+  1: 0.80,  // one year ahead
+  2: 0.65,  // two years ahead
 };
-function calcPickValueClientStyle(round: number, year: number, pickInRound?: number): number {
+const DEFAULT_FUTURE_DISCOUNT = 0.50;
+function getFuturePickDiscount(pickYear: number, referenceDraftYear: number): number {
+  const yearsAhead = Math.max(0, pickYear - referenceDraftYear);
+  return FUTURE_PICK_DISCOUNT[yearsAhead] ?? DEFAULT_FUTURE_DISCOUNT;
+}
+function calcPickValueClientStyle(round: number, year: number, pickInRound?: number, referenceYear?: number): number {
   const leagueSize = getLeagueSize(year);
   const startOfRound = (round - 1) * leagueSize + 1;
   const endOfRound = round * leagueSize;
@@ -48,7 +55,7 @@ function calcPickValueClientStyle(round: number, year: number, pickInRound?: num
     ? startOfRound + pickInRound - 1
     : (startOfRound + endOfRound) / 2;
   const effectiveAdp = draftPosition + getKeeperOffset(year);
-  const discount = CLIENT_YEAR_DISCOUNT[year] ?? 0.5;
+  const discount = referenceYear != null ? getFuturePickDiscount(year, referenceYear) : 1.0;
   return calcPlayerValue(effectiveAdp) * discount;
 }
 
@@ -61,7 +68,12 @@ function getVerdict(pctDiff: number): { label: string; severity: string } {
 }
 
 function seasonToDraftYear(season: string): number {
-  return parseInt(season.split("-")[0]);
+  const parts = season.split("-");
+  if (parts.length === 2 && parts[1].length === 2) {
+    const prefix = parts[0].substring(0, 2);
+    return parseInt(prefix + parts[1], 10);
+  }
+  return parseInt(parts[0], 10) || 2026;
 }
 
 // ─── Schemas ─────────────────────────────────────────────────
@@ -242,7 +254,8 @@ export default api({
             const year = a.pick_year;
             const round = a.pick_round ?? 6;
             if (year !== null && year !== undefined) {
-              total += calcPickValueClientStyle(round, year, a.pick_number ?? undefined);
+              const refYear = seasonToDraftYear(trade.season);
+              total += calcPickValueClientStyle(round, year, a.pick_number ?? undefined, refYear);
             }
           }
         }

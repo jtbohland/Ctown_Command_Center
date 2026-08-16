@@ -425,6 +425,70 @@ export function getRookieStarDisplay(playerName: string): string | null {
   return "⭐".repeat(stars);
 }
 
+// ─── Keeper Window — Dynasty shelf-life tiers ──────────────
+
+export type KeeperWindow = {
+  tier: "long" | "closing" | "short";
+  emoji: string;
+  label: string;
+  colorClass: string;
+  bgClass: string;
+  points: number;
+};
+
+const LONG: Omit<KeeperWindow, "points"> = {
+  tier: "long",
+  emoji: "🪟",
+  label: "Long Window",
+  colorClass: "text-emerald-400",
+  bgClass: "bg-emerald-500/15 border-emerald-500/30 text-emerald-400",
+};
+const CLOSING: Omit<KeeperWindow, "points"> = {
+  tier: "closing",
+  emoji: "🖼️",
+  label: "Closing Window",
+  colorClass: "text-amber-400",
+  bgClass: "bg-amber-500/15 border-amber-500/30 text-amber-400",
+};
+const SHORT: Omit<KeeperWindow, "points"> = {
+  tier: "short",
+  emoji: "🚪",
+  label: "Short Window",
+  colorClass: "text-red-400",
+  bgClass: "bg-red-500/15 border-red-500/30 text-red-400",
+};
+
+/**
+ * Determine keeper window tier + scoring points based on position and age.
+ *
+ * RB ages fastest:  ≤24 Long (8pts), 25-27 Closing (3pts), 28+ Short (0pts)
+ * WR has wider peak: ≤26 Long (8pts), 27-29 Closing (2pts), 30+ Short (0pts)
+ * QB/TE are age-stable: always Long Window (5pts)
+ *
+ * Returns null if age is unknown (no badge, no points).
+ */
+export function getKeeperWindow(position: string, age: number | null): KeeperWindow | null {
+  if (age == null) return null;
+
+  if (position === "QB" || position === "TE") {
+    return { ...LONG, points: 5 };
+  }
+
+  if (position === "RB") {
+    if (age <= 24) return { ...LONG, points: 8 };
+    if (age <= 27) return { ...CLOSING, points: 3 };
+    return { ...SHORT, points: 0 };
+  }
+
+  if (position === "WR") {
+    if (age <= 26) return { ...LONG, points: 8 };
+    if (age <= 29) return { ...CLOSING, points: 2 };
+    return { ...SHORT, points: 0 };
+  }
+
+  return null;
+}
+
 // League metadata
 export const LEAGUE = {
   name: "C-Town Redux!",
