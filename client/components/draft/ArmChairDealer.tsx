@@ -1,5 +1,4 @@
 import { useCallback, useMemo } from "react";
-import type { DynastyContext, TradeActualsResult } from "@/lib/trade-utils";
 import { useApiData } from "@/hooks/useApiData";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -27,34 +26,7 @@ export default function ArmChairDealer() {
     return Array.from(s).sort().reverse() as string[];
   }, [data?.trades]);
 
-  // Build dynasty context for historical trade evaluation
-  const dynastyCtx: DynastyContext | undefined = useMemo(() => {
-    if (!data?.rookieClasses || data.rookieClasses.length === 0) return undefined;
-    return { rookieClasses: data.rookieClasses, allAdp: data.historicalAdp ?? [] };
-  }, [data?.rookieClasses, data?.historicalAdp]);
 
-  // Build trade inputs for ComputeTradeActuals
-  const tradeInputs = useMemo(() => {
-    if (!data?.trades) return [];
-    return data.trades.map((t: { id: number; season: string; trade_date: string | null }) => ({
-      tradeId: t.id,
-      season: t.season,
-      tradeDate: t.trade_date,
-    }));
-  }, [data?.trades]);
-
-  // Fetch actuals for all trades (auto-fetches when trade data loads)
-  const {
-    data: actualsData,
-    loading: actualsLoading,
-    fetching: actualsFetching,
-  } = useApiData(
-    "ComputeTradeActuals",
-    { trades: tradeInputs },
-    { enabled: tradeInputs.length > 0 },
-  );
-
-  const tradeActuals: TradeActualsResult[] = actualsData?.results ?? [];
 
   // Fetch 2026 draft picks for Treasury (from draft board, not draft_capital)
   const { data: rosterData } = useApiData("GetRosterData", {});
@@ -104,11 +76,8 @@ export default function ArmChairDealer() {
               Dynasty trade evaluation powered by ADP + Actuals • {trades.length} historical trades across {seasons.length} seasons
             </span>
           </div>
-          {(fetching || actualsFetching) && (
+          {fetching && (
             <span className="text-xs text-muted-foreground ml-auto animate-pulse">🔄 Updating…</span>
-          )}
-          {actualsLoading && (
-            <span className="text-xs text-amber-400 ml-auto animate-pulse">⚡ Computing actuals…</span>
           )}
         </div>
       </div>
@@ -133,11 +102,11 @@ export default function ArmChairDealer() {
         </TabsContent>
 
         <TabsContent value="history" className="flex-1 overflow-auto px-5 py-4">
-          <TradeHistory trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} dynastyCtx={dynastyCtx} tradeActuals={tradeActuals} />
+          <TradeHistory trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} />
         </TabsContent>
 
         <TabsContent value="gbu" className="flex-1 overflow-auto px-5 py-4">
-          <GoodBadUgly trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} dynastyCtx={dynastyCtx} tradeActuals={tradeActuals} />
+          <GoodBadUgly trades={trades} assets={assets} teams={teams} historicalAdp={historicalAdp} seasons={seasons} />
         </TabsContent>
 
         <TabsContent value="siren" className="flex-1 overflow-auto px-5 py-4">

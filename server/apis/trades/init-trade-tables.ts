@@ -136,6 +136,55 @@ export default api({
       { label: "Create draft capital index" }
     );
 
+    // ── 7. Schema migrations (idempotent) ────────────────────────
+    // Add verdict columns to ffwr_trades
+    const verdictMigrations = [
+      "ALTER TABLE ffwr_trades ADD COLUMN IF NOT EXISTS team_c_total NUMERIC",
+      "ALTER TABLE ffwr_trades ADD COLUMN IF NOT EXISTS confidence TEXT",
+    ];
+    for (const sql of verdictMigrations) {
+      await ctx.integrations.apps_db.execute(sql, undefined, { label: "Verdict schema migration" });
+    }
+
+    // ── 8. Immutable verdict snapshots table ────────────────────
+    await ctx.integrations.apps_db.execute(
+      `CREATE TABLE IF NOT EXISTS ffwr_verdict_snapshots (
+        id SERIAL PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        run_type TEXT NOT NULL,
+        snapshot_ts TIMESTAMPTZ NOT NULL DEFAULT now(),
+        trade_id INTEGER NOT NULL REFERENCES ffwr_trades(id),
+        trade_number INTEGER,
+        season TEXT,
+        verdict_label TEXT,
+        verdict_emoji TEXT,
+        verdict_severity TEXT,
+        winner_team_id INTEGER,
+        pct_difference NUMERIC,
+        team_a_total NUMERIC,
+        team_b_total NUMERIC,
+        team_c_total NUMERIC,
+        confidence TEXT,
+        valuation_complete BOOLEAN
+      )`,
+      undefined,
+      { label: "Create verdict snapshots table" }
+    );
+
+    await ctx.integrations.apps_db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_ffwr_verdict_snapshots_run_id
+       ON ffwr_verdict_snapshots(run_id)`,
+      undefined,
+      { label: "Create verdict snapshots run_id index" }
+    );
+
+    await ctx.integrations.apps_db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_ffwr_verdict_snapshots_trade_id
+       ON ffwr_verdict_snapshots(trade_id)`,
+      undefined,
+      { label: "Create verdict snapshots trade_id index" }
+    );
+
     return { message: "Trade calculator tables created successfully!" };
   },
 });

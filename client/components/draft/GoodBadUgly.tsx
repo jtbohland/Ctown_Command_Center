@@ -2,17 +2,13 @@ import { useState, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
-import { DEFAULT_MODIFIERS } from "@/lib/trade-modifiers";
 import {
-  evaluateHistoricalTrade,
-  evaluateThreeTeamTrade,
   isThreeTeamTrade,
   buildSeasonAdpMap,
-  buildSeasonAdpDetailMap,
   getSeasonAdp,
   calcPlayerValue,
   calcPickValue,
-  buildTradeActualsMap,
+  buildValuationFromDb,
   SEVERITY_COLORS,
   type TradeRow,
   type TradeAssetRow,
@@ -21,8 +17,6 @@ import {
   type VerdictSeverity,
   type TradeValuation,
   type ThreeTeamValuation,
-  type DynastyContext,
-  type TradeActualsResult,
 } from "@/lib/trade-utils";
 import ThreeTeamTradeDetail from "./ThreeTeamTradeDetail";
 
@@ -32,8 +26,6 @@ interface Props {
   teams: TeamRow[];
   historicalAdp: HistoricalAdpRow[];
   seasons: string[];
-  dynastyCtx?: DynastyContext;
-  tradeActuals: TradeActualsResult[];
 }
 
 interface EvaluatedTrade {
@@ -51,15 +43,6 @@ const VERDICT_META: Record<VerdictSeverity, { title: string; emoji: string; desc
   clear: { title: "Pick Six", emoji: "🏆", description: "One side came out significantly ahead (15–25%)" },
   slight: { title: "Edge Rush", emoji: "📈", description: "Close, but one side got a little more (5–15%)" },
   fair: { title: "Fair Catch", emoji: "🧤", description: "Both sides walked away happy (within 5%)" },
-};
-
-// ─── Phase Display ─────────────────────────────────────────────
-const PHASE_LABELS: Record<string, { label: string; emoji: string; color: string }> = {
-  preseason: { label: "Pre", emoji: "📋", color: "text-slate-400" },
-  early: { label: "Early", emoji: "🌱", color: "text-blue-400" },
-  mid: { label: "Mid", emoji: "⚡", color: "text-amber-400" },
-  late: { label: "Late", emoji: "🔥", color: "text-orange-400" },
-  postseason: { label: "Post", emoji: "🏆", color: "text-emerald-400" },
 };
 
 // ─── Small sub-components ─────────────────────────────────────
@@ -142,11 +125,7 @@ function TradeOfSeasonCard({ label, emoji, et, assets, expandedId, onToggle, sea
           <span className={`text-[10px] font-extrabold tracking-widest uppercase ${colors.text}`}>{label}</span>
           <span className="text-[10px] text-muted-foreground ml-auto font-mono">#{trade.trade_number} · {trade.season}</span>
           {/* Phase badge */}
-          {valuation.seasonPhase && valuation.actualsWeight != null && valuation.actualsWeight > 0 && (
-            <span className={`text-[8px] font-mono ${PHASE_LABELS[valuation.seasonPhase]?.color ?? "text-muted-foreground"}`}>
-              {PHASE_LABELS[valuation.seasonPhase]?.emoji} {Math.round(valuation.actualsWeight * 100)}%
-            </span>
-          )}
+          {/* Confidence indicator from DB */}
         </div>
         {/* Teams row */}
         <div className="flex items-center gap-1.5 text-xs">
@@ -222,7 +201,7 @@ function TradeOfSeasonCard({ label, emoji, et, assets, expandedId, onToggle, sea
 
 // ─── Main Component ───────────────────────────────────────────
 
-export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seasons, dynastyCtx, tradeActuals }: Props) {
+export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seasons }: Props) {
   const [expandedTrades, setExpandedTrades] = useState<Set<number>>(new Set());
   const toggleExpanded = (id: number) => {
     setExpandedTrades((prev) => {
@@ -236,12 +215,8 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
   const [activeFilters, setActiveFilters] = useState<Set<VerdictSeverity>>(new Set(VERDICT_ORDER));
   const [tradeTypeFilter, setTradeTypeFilter] = useState<TradeTypeFilter>("all");
 
-  // Season-aware ADP: season → (player_name → adp_rank)
+  // Season-aware ADP: season → (player_name → adp_rank) — still used for asset value display in expanded cards
   const seasonAdpMap = useMemo(() => buildSeasonAdpMap(historicalAdp), [historicalAdp]);
-  // Season ADP detail for fallback system
-  const seasonAdpDetailMap = useMemo(() => buildSeasonAdpDetailMap(historicalAdp), [historicalAdp]);
-  // Trade actuals map: tradeId → { meta, players }
-  const actualsMap = useMemo(() => buildTradeActualsMap(tradeActuals), [tradeActuals]);
 
   // Filter trades by season
   const filteredTrades = useMemo(
@@ -257,18 +232,47 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
     );
   }, [filteredTrades, tradeTypeFilter]);
 
+  // Use canonical DB verdicts — no more client-side valuation
   const evaluated = useMemo<EvaluatedTrade[]>(() => {
-    return typeFilteredTrades.map((trade) => {
+    const results: EvaluatedTrade[] = [];
+    for (const trade of typeFilteredTrades) {
+      const valuation = buildValuationFromDb(trade, teams);
+      if (!valuation) continue; // skip trades without stored verdicts
       const is3 = isThreeTeamTrade(trade);
-      return {
-        trade,
-        valuation: evaluateHistoricalTrade(trade, assets, seasonAdpMap, dynastyCtx, actualsMap, seasonAdpDetailMap, DEFAULT_MODIFIERS.unrankedFallbackFactor),
-        threeTeamValuation: is3
-          ? evaluateThreeTeamTrade(trade, assets, seasonAdpMap, dynastyCtx, actualsMap, seasonAdpDetailMap, DEFAULT_MODIFIERS.unrankedFallbackFactor)
-          : undefined,
-      };
-    });
-  }, [typeFilteredTrades, assets, seasonAdpMap, dynastyCtx, actualsMap, seasonAdpDetailMap]);
+      const entry: EvaluatedTrade = { trade, valuation };
+      // For 3-team trades, build a lightweight ThreeTeamValuation from DB fields
+      if (is3 && trade.team_c_id != null && trade.team_c_total != null) {
+        const teamCTotal = trade.team_c_total;
+        const teamATotalVal = trade.team_a_total ?? 0;
+        const teamBTotalVal = trade.team_b_total ?? 0;
+        const allTotals: [number, number, string][] = [
+          [trade.team_a_id, teamATotalVal, trade.team_a_name],
+          [trade.team_b_id, teamBTotalVal, trade.team_b_name],
+          [trade.team_c_id, teamCTotal, trade.team_c_name ?? ""],
+        ];
+        // For 3-team trades, value = what you gave away; best deal = lowest total sent
+        allTotals.sort((a, b) => a[1] - b[1]);
+        const teamResults = allTotals.map(([id, val, name], i) => ({
+          teamId: id,
+          teamName: name,
+          sentValue: val,
+          receivedValue: 0,
+          netValue: allTotals[2][1] - val,
+          rank: i + 1,
+        })) as [any, any, any];
+        entry.threeTeamValuation = {
+          teams: teamResults,
+          winner: teamResults[0],
+          winnerMarginOverSecond: teamResults[1].sentValue - teamResults[0].sentValue,
+          conservationCheck: 0,
+          verdict: valuation.verdict,
+          valuation_complete: true,
+        };
+      }
+      results.push(entry);
+    }
+    return results;
+  }, [typeFilteredTrades, teams]);
 
   // Group by severity
   const grouped = useMemo(() => {
@@ -292,11 +296,15 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
     pct: total > 0 ? Math.round((grouped[s].length / total) * 100) : 0,
   }));
 
-  // Count blended trades
-  const blendedCount = useMemo(
-    () => evaluated.filter(et => et.valuation.actualsWeight && et.valuation.actualsWeight > 0).length,
-    [evaluated]
-  );
+  // Confidence breakdown
+  const confidenceCounts = useMemo(() => {
+    const counts = { high: 0, medium: 0, low: 0 };
+    for (const et of evaluated) {
+      const c = et.trade.confidence as keyof typeof counts;
+      if (c && c in counts) counts[c]++;
+    }
+    return counts;
+  }, [evaluated]);
 
   // Trade of the Season — biggest robbery (by %), worst absolute loss, most even
   const featuredTrades = useMemo<FeaturedTrade[]>(() => {
@@ -457,10 +465,12 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
         </div>
 
         {/* Blended indicator (replaces ADP/Actuals toggle) */}
-        {blendedCount > 0 && (
+        {(confidenceCounts.high > 0 || confidenceCounts.medium > 0) && (
           <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-2.5 py-1">
-            <span className="text-[10px] text-emerald-400 font-semibold">⚡ Blended</span>
-            <span className="text-[9px] text-emerald-400/70 font-mono">{blendedCount}/{total}</span>
+            <span className="text-[10px] text-emerald-400 font-semibold">📊 Confidence</span>
+            <span className="text-[9px] text-emerald-400/70 font-mono">
+              {confidenceCounts.high}H / {confidenceCounts.medium}M{confidenceCounts.low > 0 ? ` / ${confidenceCounts.low}L` : ""}
+            </span>
           </div>
         )}
 
@@ -623,10 +633,15 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
                         </>
                       )}
                       {/* Phase indicator */}
-                      {valuation.seasonPhase && valuation.actualsWeight != null && valuation.actualsWeight > 0 && (
-                        <span className={`text-[8px] font-mono shrink-0 ${PHASE_LABELS[valuation.seasonPhase]?.color ?? "text-muted-foreground"}`}>
-                          {PHASE_LABELS[valuation.seasonPhase]?.emoji} {Math.round(valuation.actualsWeight * 100)}%
-                        </span>
+                      {/* Confidence badge */}
+                      {trade.confidence && (
+                        <Badge variant="outline" className={`text-[8px] px-1 py-0 shrink-0 ${
+                          trade.confidence === 'high' ? 'border-emerald-500/30 text-emerald-400' :
+                          trade.confidence === 'low' ? 'border-red-500/30 text-red-400' :
+                          'border-amber-500/30 text-amber-400'
+                        }`}>
+                          {trade.confidence === 'high' ? '✓' : trade.confidence === 'low' ? '?' : '~'}
+                        </Badge>
                       )}
                       {is3Way && displayWinner ? (
                         <span className={`text-[10px] font-bold ml-auto ${colors.text}`}>
@@ -650,7 +665,7 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp, seas
                             trade={trade}
                             assets={assets}
                             seasonAdpMap={seasonAdpMap}
-                            dynastyCtx={dynastyCtx}
+                            teams={teams}
                           />
                         ) : (
                           <>
