@@ -48,7 +48,7 @@ export default api({
 
       await ctx.integrations.apps_db.execute(
         `UPDATE ffwr_players
-         SET is_keeper = true, keeper_team_id = $1, is_drafted = true, drafted_team_id = $1
+         SET is_keeper = true, keeper_team_id = $1, is_drafted = true, drafted_team_id = $1, roster_team_id = $1
          WHERE id = $2`,
         [teamId, playerId],
         { label: `Add keeper: player ${playerId} → team ${teamId}` },
@@ -68,7 +68,7 @@ export default api({
 
       await ctx.integrations.apps_db.execute(
         `UPDATE ffwr_players
-         SET is_keeper = false, keeper_team_id = NULL, is_drafted = false, drafted_team_id = NULL
+         SET is_keeper = false, keeper_team_id = NULL, is_drafted = false, drafted_team_id = NULL, roster_team_id = NULL
          WHERE id = $1`,
         [playerId],
         { label: `Remove keeper: player ${playerId}` },
@@ -102,7 +102,7 @@ export default api({
 
       await ctx.integrations.apps_db.execute(
         `UPDATE ffwr_players
-         SET is_keeper = false, keeper_team_id = NULL, is_drafted = false, drafted_team_id = NULL
+         SET is_keeper = false, keeper_team_id = NULL, is_drafted = false, drafted_team_id = NULL, roster_team_id = NULL
          WHERE id = $1`,
         [playerId],
         { label: `Remove old keeper: ${oldPlayer[0].name}` },
@@ -110,7 +110,7 @@ export default api({
 
       await ctx.integrations.apps_db.execute(
         `UPDATE ffwr_players
-         SET is_keeper = true, keeper_team_id = $1, is_drafted = true, drafted_team_id = $1
+         SET is_keeper = true, keeper_team_id = $1, is_drafted = true, drafted_team_id = $1, roster_team_id = $1
          WHERE id = $2`,
         [teamId, newPlayerId],
         { label: `Add new keeper: ${newPlayer[0].name}` },

@@ -188,7 +188,13 @@ export default api({
         throw new Error("Dynasty CSV must have 'player name' and 'pos' columns. Found: " + header.join(", "));
       }
 
-      let updated = 0;
+      // Parse all rows first
+      const dynRows: Array<{
+        name: string; position: string; dynastyRank: number | null;
+        dynastyTier: number | null; age: number | null; nflTeam: string;
+        posRank: number | null;
+      }> = [];
+
       for (let i = 1; i < lines.length; i++) {
         const cols: string[] = parseCsvLine(lines[i]);
         const rawName = cols[dnNameIdx] || "";
@@ -201,27 +207,49 @@ export default api({
         const name = normalizePlayerName(rawName);
         if (!name) continue;
 
-        const dynastyRank = rkIdx >= 0 ? parseFloat(cols[rkIdx]) || null : null;
-        const dynastyTier = tierColIdx >= 0 ? parseInt(cols[tierColIdx]) || null : null;
-        const age = dnAgeIdx >= 0 ? parseInt(cols[dnAgeIdx]) || null : null;
-        const nflTeam = dnTeamIdx >= 0 ? (cols[dnTeamIdx] || "").trim() : "";
+        dynRows.push({
+          name,
+          position,
+          dynastyRank: rkIdx >= 0 ? parseFloat(cols[rkIdx]) || null : null,
+          dynastyTier: tierColIdx >= 0 ? parseInt(cols[tierColIdx]) || null : null,
+          age: dnAgeIdx >= 0 ? parseInt(cols[dnAgeIdx]) || null : null,
+          nflTeam: dnTeamIdx >= 0 ? (cols[dnTeamIdx] || "").trim() : "",
+          posRank: parseInt(posRaw.replace(/[^0-9]/g, "")) || null,
+        });
+      }
 
-        // Extract positional rank from POS column (e.g., "WR1" → 1)
-        const posRankFromCol = parseInt(posRaw.replace(/[^0-9]/g, "")) || null;
+      if (dynRows.length === 0) {
+        return { imported: 0, updated: 0, message: "No dynasty players parsed from CSV." };
+      }
 
+      // Batch update in chunks of 50 using a VALUES list + FROM join
+      const CHUNK = 50;
+      let updated = 0;
+      for (let c = 0; c < dynRows.length; c += CHUNK) {
+        const chunk = dynRows.slice(c, c + CHUNK);
+        const values: string[] = [];
+        const params: (string | number | null)[] = [];
+        for (let j = 0; j < chunk.length; j++) {
+          const r = chunk[j];
+          const o = j * 7; // 7 params per row
+          values.push(`($${o + 1}, $${o + 2}, $${o + 3}::float, $${o + 4}::int, $${o + 5}::int, $${o + 6}::text, $${o + 7}::int)`);
+          params.push(r.name, r.position, r.dynastyRank, r.dynastyTier, r.age, r.nflTeam, r.posRank);
+        }
         await ctx.integrations.apps_db.execute(
-          `UPDATE ffwr_players SET
-             dynasty_rank = COALESCE($3, dynasty_rank),
-             dynasty_tier = COALESCE($4, dynasty_tier),
-             age = COALESCE($5, age),
-             nfl_team = CASE WHEN $6::text <> '' THEN $6 ELSE nfl_team END,
-             positional_rank = COALESCE($7, positional_rank)
-           WHERE LOWER(REPLACE(REPLACE(name, '.', ''), ' ', '')) = LOWER(REPLACE(REPLACE($1::text, '.', ''), ' ', ''))
-             AND position = $2`,
-          [name, position, dynastyRank, dynastyTier, age, nflTeam, posRankFromCol],
-          { label: `Dynasty update: ${name} (${position})` }
+          `UPDATE ffwr_players p SET
+             dynasty_rank = COALESCE(v.dynasty_rank, p.dynasty_rank),
+             dynasty_tier = COALESCE(v.dynasty_tier, p.dynasty_tier),
+             age = COALESCE(v.age, p.age),
+             nfl_team = CASE WHEN v.nfl_team <> '' THEN v.nfl_team ELSE p.nfl_team END,
+             positional_rank = COALESCE(v.pos_rank, p.positional_rank)
+           FROM (VALUES ${values.join(", ")})
+             AS v(name, position, dynasty_rank, dynasty_tier, age, nfl_team, pos_rank)
+           WHERE LOWER(REPLACE(REPLACE(p.name, '.', ''), ' ', '')) = LOWER(REPLACE(REPLACE(v.name, '.', ''), ' ', ''))
+             AND p.position = v.position`,
+          params,
+          { label: `Batch dynasty update: rows ${c + 1}-${c + chunk.length}` }
         );
-        updated++;
+        updated += chunk.length;
       }
 
       return {
