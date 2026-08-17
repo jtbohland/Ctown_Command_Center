@@ -104,15 +104,15 @@ export function calcPlayerValue(adpRank: number): number {
 export function calcPickValue(
   round: number,
   year: number,
-  pickInRound?: number,
+  overallPick?: number,
   referenceYear: number = CURRENT_DRAFT_YEAR,
 ): number {
   const leagueSize = getLeagueSize(year);
-  const startOfRound = (round - 1) * leagueSize + 1;
-  const endOfRound = round * leagueSize;
-  const draftPosition = pickInRound
-    ? startOfRound + pickInRound - 1
-    : (startOfRound + endOfRound) / 2;
+  // overallPick is the overall draft position (e.g. pick 28 overall).
+  // Use it directly. Only fall back to round midpoint when unknown.
+  const draftPosition = overallPick
+    ? overallPick
+    : ((round - 1) * leagueSize + 1 + round * leagueSize) / 2;
   const effectiveAdp = draftPosition + getKeeperOffset(year);
   const discount = getFuturePickDiscount(year, referenceYear);
   return calcPlayerValue(effectiveAdp) * discount;
