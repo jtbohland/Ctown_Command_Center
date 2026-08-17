@@ -151,6 +151,15 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp }: Pr
       return next;
     });
   };
+  const [expandedSections, setExpandedSections] = useState<Set<VerdictSeverity>>(new Set());
+  const toggleSection = (s: VerdictSeverity) => {
+    setExpandedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(s)) next.delete(s);
+      else next.add(s);
+      return next;
+    });
+  };
   const [selectedSeason, setSelectedSeason] = useState<string>("all");
   const [selectedManager, setSelectedManager] = useState<string>("all");
   const [playerSearch, setPlayerSearch] = useState("");
@@ -610,10 +619,15 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp }: Pr
         const colors = SEVERITY_COLORS[severity];
         const items = grouped[severity];
         if (items.length === 0) return null;
+        const isSectionExpanded = expandedSections.has(severity);
 
         return (
           <div key={severity} className="space-y-2">
-            <div className={`flex items-center gap-2 py-2 px-3 rounded-lg ${colors.bg} border ${colors.border}`}>
+            <div
+              className={`flex items-center gap-2 py-2 px-3 rounded-lg cursor-pointer transition-all ${colors.bg} border ${colors.border} hover:opacity-90`}
+              onClick={() => toggleSection(severity)}
+            >
+              <span className={`text-xs transition-transform ${isSectionExpanded ? "rotate-90" : ""}`}>▶</span>
               <span className="text-lg">{meta.emoji}</span>
               <div>
                 <h3 className={`text-sm font-bold ${colors.text}`}>{meta.title}</h3>
@@ -622,6 +636,7 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp }: Pr
               <Badge className={`ml-auto ${colors.badge} border`}>{items.length}</Badge>
             </div>
 
+            {isSectionExpanded && (
             <div className="space-y-1.5 pl-2">
               {items.map(({ trade, valuation, threeTeamValuation: threeTeamVal }) => {
                 const isExpanded = expandedTrades.has(trade.id);
@@ -713,6 +728,7 @@ export default function GoodBadUgly({ trades, assets, teams, historicalAdp }: Pr
                 );
               })}
             </div>
+            )}
           </div>
         );
       })}
