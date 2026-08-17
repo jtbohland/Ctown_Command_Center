@@ -57,13 +57,13 @@ function getKeeperOffset(year: number): number {
   return getLeagueSize(year) * KEEPERS_PER_TEAM;
 }
 
-function pickToExpectedAdp(round: number, year: number, pickInRound?: number): number {
+function pickToExpectedAdp(round: number, year: number, overallPick?: number): number {
   const leagueSize = getLeagueSize(year);
-  const startOfRound = (round - 1) * leagueSize + 1;
-  const endOfRound = round * leagueSize;
-  const draftPosition = pickInRound
-    ? startOfRound + pickInRound - 1
-    : (startOfRound + endOfRound) / 2;
+  // overallPick is the overall draft position (e.g. pick 28 overall).
+  // Use it directly. Only fall back to round midpoint when unknown.
+  const draftPosition = overallPick
+    ? overallPick
+    : ((round - 1) * leagueSize + 1 + round * leagueSize) / 2;
   return draftPosition + getKeeperOffset(year);
 }
 

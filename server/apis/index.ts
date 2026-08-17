@@ -52,7 +52,7 @@ import GetLeagueRecords from './settings/get-league-records.js';
 import DownloadLeagueRecord from './settings/download-league-record.js';
 import BackfillTradeVerdicts from './trades/backfill-trade-verdicts.js';
 import ProvenanceReport from './trades/provenance-report.js';
-import CrossSurfaceComparison from './trades/cross-surface-comparison.js';
+import CanonicalVerdictAudit from './trades/canonical-verdict-audit.js';
 import TakeVerdictSnapshot from './trades/take-verdict-snapshot.js';
 import FantasyWiz from './chat/fantasy-wiz.js';
 
@@ -112,7 +112,7 @@ const apis = {
   DownloadLeagueRecord,
   BackfillTradeVerdicts,
   ProvenanceReport,
-  CrossSurfaceComparison,
+  CanonicalVerdictAudit,
   TakeVerdictSnapshot,
   FantasyWiz,
 } as const;
