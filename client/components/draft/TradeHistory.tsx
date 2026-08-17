@@ -30,7 +30,7 @@ interface Props {
 const ITEMS_PER_PAGE = 20;
 
 export default function TradeHistory({ trades, assets, teams, historicalAdp }: Props) {
-  const [seasonFilter, setSeasonFilter] = useState<string>("all");
+  const [seasonFilter, setSeasonFilter] = useState<string>("");
   const [playerSearch, setPlayerSearch] = useState("");
   const [page, setPage] = useState(0);
   const [expandedTrade, setExpandedTrade] = useState<number | null>(null);
@@ -57,10 +57,13 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp }: P
     return all.filter((s) => present.has(s));
   }, [tradesWithVerdicts]);
 
+  // Default to newest season once available
+  const effectiveSeasonFilter = seasonFilter || availableSeasons[0] || "";
+
   const filteredTrades = useMemo(() => {
     let list = tradesWithVerdicts;
-    if (seasonFilter !== "all") {
-      list = list.filter((t) => t.displaySeason === seasonFilter);
+    if (effectiveSeasonFilter) {
+      list = list.filter((t) => t.displaySeason === effectiveSeasonFilter);
     }
     if (playerSearch.trim()) {
       const q = playerSearch.trim().toLowerCase();
@@ -72,7 +75,7 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp }: P
       list = list.filter((t) => matchingTradeIds.has(t.trade.id));
     }
     return list;
-  }, [tradesWithVerdicts, seasonFilter, playerSearch, assets]);
+  }, [tradesWithVerdicts, effectiveSeasonFilter, playerSearch, assets]);
 
   const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setPlayerSearch(e.target.value);
@@ -107,12 +110,11 @@ export default function TradeHistory({ trades, assets, teams, historicalAdp }: P
           placeholder="🔍 Search player name…"
           className="h-8 w-44 text-xs"
         />
-        <Select value={seasonFilter} onValueChange={(v) => { setSeasonFilter(v); setPage(0); }}>
+        <Select value={effectiveSeasonFilter} onValueChange={(v) => { setSeasonFilter(v); setPage(0); }}>
           <SelectTrigger className="h-8 w-36 text-xs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Seasons</SelectItem>
             {availableSeasons.map((s) => (
               <SelectItem key={s} value={s}>{s}</SelectItem>
             ))}
