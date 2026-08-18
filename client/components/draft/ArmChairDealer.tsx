@@ -16,9 +16,13 @@ import ReduxRosters from "./ReduxRosters";
 export default function ArmChairDealer() {
   const { data, loading, fetching, isError, error, refetch } = useApiData("GetTradeData", {});
 
+  // Fetch 2026 draft picks for Treasury (from draft board, not draft_capital)
+  const { data: rosterData, refetch: refetchRosters } = useApiData("GetRosterData", {});
+
   const handleTradeSaved = useCallback(() => {
-    refetch();
-  }, [refetch]);
+    refetch();        // Ledger, Verdicts, Treasury capital
+    refetchRosters(); // Treasury draft board, Redux Rosters
+  }, [refetch, refetchRosters]);
 
   // Derive display seasons using NFL calendar
   const seasonCount = useMemo(() => {
@@ -30,11 +34,6 @@ export default function ArmChairDealer() {
     );
     return getAllCTownSeasons().filter((s) => present.has(s)).length;
   }, [data?.trades]);
-
-
-
-  // Fetch 2026 draft picks for Treasury (from draft board, not draft_capital)
-  const { data: rosterData } = useApiData("GetRosterData", {});
 
   if (loading) {
     return (

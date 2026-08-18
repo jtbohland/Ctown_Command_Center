@@ -65,9 +65,9 @@ const DraftOrderRow = memo(function DraftOrderRow({
         isMine ? "bg-primary/10 border border-primary/30" : ""
       }`}
     >
-      {/* Pick number */}
+      {/* Pick slot: round.original_team_id (the original draft slot) */}
       <span className="text-[10px] font-mono text-muted-foreground w-7 text-right shrink-0">
-        {pick.round}.{String(Math.ceil(pick.id % 100) || 1).padStart(2, "0")}
+        {pick.round}.{String(pick.original_team_id).padStart(2, "0")}
       </span>
 
       {/* Team color dot */}
@@ -111,19 +111,12 @@ export default function DraftCapitalView({ draftCapital, teams, draftPicks2026 }
     return Array.from(s).sort();
   }, [draftCapital]);
 
-  const filtered = useMemo(() => {
-    return draftCapital.filter((dc) => dc.year === Number(yearFilter));
-  }, [draftCapital, yearFilter]);
-
-  // Convert 2026 draft picks into DraftCapitalRow format
+  // Convert 2026 draft picks into DraftCapitalRow format (must be before `filtered`).
+  // Uses pick_in_round as original_team_id since team_id == draft_position for all 11 teams.
   const capital2026 = useMemo(() => {
     if (!draftPicks2026 || draftPicks2026.length === 0) return [];
     return draftPicks2026.map((dp, idx) => {
-      // Find the team that owns this pick
       const ownerTeam = teams.find((t) => t.id === dp.team_id);
-      // In ffwr_draft_picks, team_id already reflects traded ownership,
-      // and original_team_id = pick_in_round order (pick slot)
-      // Use pick_in_round to infer original team (slot-based)
       const originalTeam = teams.find((t) => t.id === dp.pick_in_round) ?? ownerTeam;
       return {
         id: -(idx + 1),
@@ -136,6 +129,14 @@ export default function DraftCapitalView({ draftCapital, teams, draftPicks2026 }
       } as DraftCapitalRow;
     });
   }, [draftPicks2026, teams]);
+
+  const filtered = useMemo(() => {
+    const yr = Number(yearFilter);
+    // For 2026, use draft board data (capital2026) instead of ffwr_draft_capital
+    // to avoid duplicating picks when both sources exist
+    if (yr === 2026 && capital2026.length > 0) return [];
+    return draftCapital.filter((dc) => dc.year === yr);
+  }, [draftCapital, yearFilter, capital2026]);
 
   // For future years without data, generate virtual "full" capital
   const virtualCapital = useMemo(() => {
@@ -268,11 +269,12 @@ export default function DraftCapitalView({ draftCapital, teams, draftPicks2026 }
                     <div className="flex flex-wrap gap-1">
                       {picks.sort((a, b) => a.year - b.year || a.round - b.round).map((p) => {
                         const isAcquired = p.original_team_id !== team.id;
-                        // For 2026 picks, show granular detail from draft board
+                        // For 2026 picks, match by original_team_id → pick_in_round for unique targeting
+                        // (original_team_id == pick_in_round because team_id == draft_position for all teams)
                         const is2026 = p.year === 2026;
                         const draftBoardPick = is2026 && draftPicks2026
                           ? draftPicks2026.find(
-                              (dp) => dp.round === p.round && dp.team_id === p.current_team_id
+                              (dp) => dp.round === p.round && dp.pick_in_round === p.original_team_id
                             )
                           : null;
                         const pickLabel = is2026 && draftBoardPick
