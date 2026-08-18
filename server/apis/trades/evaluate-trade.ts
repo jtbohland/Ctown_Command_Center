@@ -9,12 +9,11 @@ const DEFAULT_POWER = 0.6;
 const KEEPERS_PER_TEAM = 4;
 
 // C-Town league size by draft year: 10 teams 2019-2024, 11 teams 2025+
-// Per spec §3: "C-Town had 10 teams for fantasy draft years 2019–2024 and 11 teams for 2025–2026"
 const LEAGUE_SIZE_BY_YEAR: Record<number, number> = {
   2019: 10, 2020: 10, 2021: 10, 2022: 10, 2023: 10, 2024: 10,
   2025: 11, 2026: 11, 2027: 11,
 };
-const DEFAULT_LEAGUE_SIZE = 11; // for future years beyond the map
+const DEFAULT_LEAGUE_SIZE = 11;
 
 function getLeagueSize(year: number): number {
   return LEAGUE_SIZE_BY_YEAR[year] ?? DEFAULT_LEAGUE_SIZE;
@@ -26,7 +25,7 @@ function getKeeperOffset(year: number): number {
 
 // ─── Dynasty Multiplier Constants ───────────────────────────
 const ROOKIE_MAX_PICK = 128;
-const ROOKIE_MIN_BOOST = 0.01;    // +1% at pick 128
+const ROOKIE_MIN_BOOST = 0.01;
 
 function getRookiePremium(overallPick: number, maxBoost: number): number {
   if (overallPick < 1 || overallPick > ROOKIE_MAX_PICK) return 1.0;
@@ -35,7 +34,6 @@ function getRookiePremium(overallPick: number, maxBoost: number): number {
   return 1 + boost;
 }
 
-// Raw age factor (before ageCurve multiplier is applied)
 function getRawAgeFactor(age: number): number {
   if (age <= 24) return 1.06;
   if (age <= 27) return 1.03;
@@ -45,15 +43,12 @@ function getRawAgeFactor(age: number): number {
 }
 
 function getAgeFactor(age: number, ageCurve: number): number {
-  if (ageCurve === 0) return 1.0; // age disabled
+  if (ageCurve === 0) return 1.0;
   const raw = getRawAgeFactor(age);
-  // Scale the deviation from 1.0 by ageCurve
   return 1.0 + (raw - 1.0) * ageCurve;
 }
 
-// normalizeName + extractKeeperRightsPlayer imported from shared module
-
-// Future pick discount: computed from futurePickDiscount modifier
+// Future pick discount
 const CURRENT_YEAR_FOR_DISCOUNT = 2026;
 function getYearDiscount(year: number, perYearDiscount: number): number {
   const yearsOut = Math.max(0, year - CURRENT_YEAR_FOR_DISCOUNT);
@@ -63,8 +58,6 @@ function getYearDiscount(year: number, perYearDiscount: number): number {
 
 function pickToExpectedAdp(round: number, year: number, overallPick?: number): number {
   const leagueSize = getLeagueSize(year);
-  // overallPick is the overall draft position (e.g. pick 28 overall).
-  // Use it directly. Only fall back to round midpoint when unknown.
   const draftPosition = overallPick
     ? overallPick
     : ((round - 1) * leagueSize + 1 + round * leagueSize) / 2;
@@ -82,14 +75,253 @@ function getVerdict(
   verdictScale: number,
 ): { label: string; emoji: string; severity: string } {
   const absDiff = Math.abs(pctDiff);
-  const t1 = fairTolerance;                    // Fair Catch ceiling
-  const t2 = fairTolerance + 10 * verdictScale; // Edge Rush ceiling
-  const t3 = fairTolerance + 20 * verdictScale; // Pick Six ceiling
+  const t1 = fairTolerance;
+  const t2 = fairTolerance + 10 * verdictScale;
+  const t3 = fairTolerance + 20 * verdictScale;
   if (absDiff <= t1) return { label: "Fair Catch", emoji: "🧤", severity: "fair" };
   if (absDiff <= t2) return { label: "Edge Rush", emoji: "📈", severity: "slight" };
   if (absDiff <= t3) return { label: "Pick Six", emoji: "🏆", severity: "clear" };
   return { label: "Flag on the Play", emoji: "🚩", severity: "robbery" };
 }
+
+// ─── NFL Season Calendar (for live Actuals blending) ────────
+// Week 1 Tuesday = the Tuesday of the first game week.
+// All dates are the Tuesday that starts the "week 1 scoring window".
+const NFL_WEEK1_TUESDAY: Record<string, string> = {
+  "2018-19": "2018-09-04",
+  "2019-20": "2019-09-03",
+  "2020-21": "2020-09-08",
+  "2021-22": "2021-09-07",
+  "2022-23": "2022-09-06",
+  "2023-24": "2023-09-05",
+  "2024-25": "2024-09-03",
+  "2025-26": "2025-09-02",
+  "2026-27": "2026-09-08", // 2026 NFL season starts Wed Sep 9; Tuesday = Sep 8
+};
+
+const REGULAR_SEASON_WEEKS: Record<string, number> = {
+  "2018-19": 17,
+  "2019-20": 17,
+  "2020-21": 17,
+  "2021-22": 18,
+  "2022-23": 18,
+  "2023-24": 18,
+  "2024-25": 18,
+  "2025-26": 18,
+  "2026-27": 18,
+};
+
+// The current season for the live Exchange
+const CURRENT_SEASON = "2026-27";
+
+type SeasonPhase = "preseason" | "early" | "mid" | "late" | "postseason";
+
+interface PhaseInfo {
+  lastCompletedWeek: number;
+  seasonPhase: SeasonPhase;
+  actualsWeight: number;
+  totalWeeks: number;
+}
+
+/**
+ * Determine the current NFL season phase and actuals weight based on a valuation date.
+ * Weight scale (compounding — the more weeks, the more data, the more we trust actuals):
+ *   Preseason:      0%
+ *   Early (wk 1-4): 10% → 20%  (ramps ~3.3% per week)
+ *   Mid (wk 5-10):  25% → 35%  (ramps ~2% per week)
+ *   Late (wk 11-18):40% → 50%  (ramps ~1.4% per week)
+ *   Postseason:     85%
+ */
+function getSeasonPhaseInfo(valuationDate: string, season: string): PhaseInfo {
+  const week1Tuesday = NFL_WEEK1_TUESDAY[season];
+  const totalWeeks = REGULAR_SEASON_WEEKS[season] ?? 18;
+
+  if (!week1Tuesday) {
+    return { lastCompletedWeek: 0, seasonPhase: "preseason", actualsWeight: 0, totalWeeks };
+  }
+
+  const valDateMs = new Date(valuationDate).getTime();
+  const week1Ms = new Date(week1Tuesday).getTime();
+  const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+
+  if (valDateMs < week1Ms) {
+    return { lastCompletedWeek: 0, seasonPhase: "preseason", actualsWeight: 0, totalWeeks };
+  }
+
+  const weeksElapsed = Math.floor((valDateMs - week1Ms) / msPerWeek);
+  const lastCompletedWeek = Math.min(weeksElapsed, totalWeeks);
+
+  let seasonPhase: SeasonPhase;
+  let actualsWeight: number;
+
+  if (lastCompletedWeek === 0) {
+    seasonPhase = "preseason";
+    actualsWeight = 0;
+  } else if (lastCompletedWeek <= 4) {
+    // Early: 10% at week 1, ramps to 20% at week 4
+    seasonPhase = "early";
+    actualsWeight = 0.10 + (lastCompletedWeek - 1) * (0.10 / 3);
+  } else if (lastCompletedWeek <= 10) {
+    // Mid: 25% at week 5, ramps to 35% at week 10
+    seasonPhase = "mid";
+    actualsWeight = 0.25 + (lastCompletedWeek - 5) * (0.10 / 5);
+  } else if (lastCompletedWeek <= totalWeeks) {
+    // Late: 40% at week 11, ramps to 50% at final week
+    seasonPhase = "late";
+    const lateWeeks = totalWeeks - 11 + 1;
+    actualsWeight = 0.40 + (lastCompletedWeek - 11) * (0.10 / (lateWeeks - 1));
+    actualsWeight = Math.min(actualsWeight, 0.50);
+  } else {
+    seasonPhase = "postseason";
+    actualsWeight = 0.85;
+  }
+
+  // Override: if all regular season weeks are complete → postseason
+  if (lastCompletedWeek >= totalWeeks) {
+    seasonPhase = "postseason";
+    actualsWeight = 0.85;
+  }
+
+  actualsWeight = Math.round(actualsWeight * 1000) / 1000;
+
+  return { lastCompletedWeek, seasonPhase, actualsWeight, totalWeeks };
+}
+
+// ─── Weekly Actuals Computation (ported from backfill) ──────
+interface WeeklyActualsRow {
+  player_name: string;
+  position: string;
+  season: string;
+  week_1: number | null;
+  week_2: number | null;
+  week_3: number | null;
+  week_4: number | null;
+  week_5: number | null;
+  week_6: number | null;
+  week_7: number | null;
+  week_8: number | null;
+  week_9: number | null;
+  week_10: number | null;
+  week_11: number | null;
+  week_12: number | null;
+  week_13: number | null;
+  week_14: number | null;
+  week_15: number | null;
+  week_16: number | null;
+  week_17: number | null;
+  week_18: number | null;
+}
+
+const WeeklyActualsSchema = z.object({
+  player_name: z.string(),
+  position: z.string(),
+  season: z.string(),
+  week_1: z.coerce.number().nullable(),
+  week_2: z.coerce.number().nullable(),
+  week_3: z.coerce.number().nullable(),
+  week_4: z.coerce.number().nullable(),
+  week_5: z.coerce.number().nullable(),
+  week_6: z.coerce.number().nullable(),
+  week_7: z.coerce.number().nullable(),
+  week_8: z.coerce.number().nullable(),
+  week_9: z.coerce.number().nullable(),
+  week_10: z.coerce.number().nullable(),
+  week_11: z.coerce.number().nullable(),
+  week_12: z.coerce.number().nullable(),
+  week_13: z.coerce.number().nullable(),
+  week_14: z.coerce.number().nullable(),
+  week_15: z.coerce.number().nullable(),
+  week_16: z.coerce.number().nullable(),
+  week_17: z.coerce.number().nullable(),
+  week_18: z.coerce.number().nullable(),
+});
+
+interface PlayerCutoffStats {
+  normalizedName: string;
+  position: string;
+  totalPoints: number;
+  gamesPlayed: number;
+  ppg: number;
+}
+
+function computeThroughCutoff(row: WeeklyActualsRow, lastWeek: number): { totalPoints: number; gamesPlayed: number; ppg: number } {
+  let total = 0;
+  let games = 0;
+
+  const weekValues: (number | null)[] = [
+    row.week_1, row.week_2, row.week_3, row.week_4,
+    row.week_5, row.week_6, row.week_7, row.week_8,
+    row.week_9, row.week_10, row.week_11, row.week_12,
+    row.week_13, row.week_14, row.week_15, row.week_16,
+    row.week_17, row.week_18,
+  ];
+
+  for (let w = 0; w < lastWeek && w < weekValues.length; w++) {
+    const pts = weekValues[w];
+    if (pts !== null && pts !== undefined) {
+      total += pts;
+      games++;
+    }
+  }
+
+  const ppg = games > 0 ? Math.round((total / games) * 100) / 100 : 0;
+  total = Math.round(total * 100) / 100;
+
+  return { totalPoints: total, gamesPlayed: games, ppg };
+}
+
+/**
+ * Compute positional percentiles from through-cutoff stats.
+ * Returns a Map<normalizedName, percentileValue (0-100)>.
+ * Percentile = 60% total-pts rank + 40% PPG rank within position.
+ */
+function computePositionalPercentiles(
+  players: PlayerCutoffStats[],
+): Map<string, number> {
+  const byPosition = new Map<string, PlayerCutoffStats[]>();
+  for (const p of players) {
+    const pos = p.position.toUpperCase();
+    if (!byPosition.has(pos)) byPosition.set(pos, []);
+    byPosition.get(pos)!.push(p);
+  }
+
+  const result = new Map<string, number>();
+
+  for (const [, group] of byPosition.entries()) {
+    const totalInPos = group.length;
+
+    const byPts = [...group].sort((a, b) => b.totalPoints - a.totalPoints);
+    const ptsRankMap = new Map<string, number>();
+    byPts.forEach((p, i) => ptsRankMap.set(p.normalizedName, i + 1));
+
+    const byPpg = [...group].filter(p => p.gamesPlayed > 0).sort((a, b) => b.ppg - a.ppg);
+    const ppgRankMap = new Map<string, number>();
+    const ppgTotal = byPpg.length;
+    byPpg.forEach((p, i) => ppgRankMap.set(p.normalizedName, i + 1));
+
+    for (const p of group) {
+      const ptsRank = ptsRankMap.get(p.normalizedName) ?? totalInPos;
+      const ppgRank = ppgRankMap.get(p.normalizedName) ?? ppgTotal;
+
+      const totalPtsPercentile = Math.round(
+        ((totalInPos - ptsRank + 1) / totalInPos) * 100 * 10,
+      ) / 10;
+      const ppgPercentile = ppgTotal > 0
+        ? Math.round(((ppgTotal - ppgRank + 1) / ppgTotal) * 100 * 10) / 10
+        : 0;
+
+      const actualsValue = Math.round(
+        (0.60 * totalPtsPercentile + 0.40 * ppgPercentile) * 10,
+      ) / 10;
+
+      result.set(p.normalizedName, actualsValue);
+    }
+  }
+
+  return result;
+}
+
+// ─── Schemas ────────────────────────────────────────────────
 
 const AssetInputSchema = z.object({
   type: z.enum(["player", "pick"]),
@@ -101,12 +333,25 @@ const AssetInputSchema = z.object({
   pickNumber: z.number().nullable().optional(),
 });
 
+// Per-player actuals detail (only present when actuals are blended)
+const ActualsDetailSchema = z.object({
+  totalPoints: z.number(),
+  gamesPlayed: z.number(),
+  ppg: z.number(),
+  actualsPercentile: z.number(),
+  adpOnlyValue: z.number(),      // value before blending
+  actualsOnlyValue: z.number(),   // pure actuals-derived value
+  actualsAdjustment: z.number(),  // difference: final - adpOnly
+  finalBlendedValue: z.number(),  // value after blending
+});
+
 const ValuationSchema = z.object({
   name: z.string(),
   value: z.number(),
   adpUsed: z.number().nullable(),
   dynastyFactors: z.array(z.string()),
   valueStatus: z.enum(["resolved", "unresolved"]),
+  actualsDetail: ActualsDetailSchema.nullable(),
 });
 
 const SideResultSchema = z.object({
@@ -114,6 +359,19 @@ const SideResultSchema = z.object({
   totalValue: z.number(),
   hasUnresolved: z.boolean(),
   unresolvedReasons: z.array(z.string()),
+});
+
+// Top-level actuals context returned with every evaluation
+const ActualsContextSchema = z.object({
+  valuationDate: z.string(),
+  season: z.string(),
+  seasonPhase: z.string(),
+  lastCompletedWeek: z.number(),
+  weeksIncluded: z.number(),
+  actualsWeight: z.number(),
+  adpWeight: z.number(),
+  actualsAvailable: z.boolean(),
+  playersWithActuals: z.number(),
 });
 
 const DejaVuAssetSchema = z.object({
@@ -161,7 +419,7 @@ const RookieSchema = z.object({
 
 export default api({
   name: "EvaluateTrade",
-  description: "Evaluates a proposed trade using power-law valuation with dynasty multipliers.",
+  description: "Evaluates a proposed trade with ADP, dynasty modifiers, and live current-season Actuals blending.",
 
   integrations: {
     apps_db: postgres(APPS_DB),
@@ -198,11 +456,12 @@ export default api({
       severity: z.string(),
     }),
     verdictStatus: z.enum(["definitive", "incomplete"]),
+    actualsContext: ActualsContextSchema,
     dejaVu: z.array(DejaVuSchema),
   }),
 
   async run(ctx, { teamAId, teamBId, teamAGives, teamBGives, modifiers }) {
-    // Merge modifiers with defaults
+    // ── Step 1: Merge modifiers with defaults ──
     const mod = {
       qbScarcity: modifiers?.qbScarcity ?? 1.08,
       tePremium: modifiers?.tePremium ?? 1.00,
@@ -216,14 +475,21 @@ export default api({
       verdictScale: modifiers?.verdictScale ?? 1.0,
       dejaVuSensitivity: modifiers?.dejaVuSensitivity ?? 3,
     };
-    // Get current season ADP with positions
+
+    // ── Step 2: Determine current season phase and actuals weight ──
+    const valuationDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const phaseInfo = getSeasonPhaseInfo(valuationDate, CURRENT_SEASON);
+    ctx.log.info(`Valuation date: ${valuationDate}, season: ${CURRENT_SEASON}, phase: ${phaseInfo.seasonPhase}, week: ${phaseInfo.lastCompletedWeek}, actualsWeight: ${phaseInfo.actualsWeight}`);
+
+    // ── Step 3: Load current ADP ──
     const currentAdp = await ctx.integrations.apps_db.query(
       `SELECT player_name, adp_rank, position FROM ffwr_historical_adp WHERE season = '2026-27' ORDER BY adp_rank LIMIT 300`,
       AdpRowSchema,
       undefined,
-      { label: "Fetch current ADP with positions" }
+      { label: "Fetch current ADP with positions" },
     );
-    const adpMap = new Map(currentAdp.map((p) => [normalizeName(p.player_name), p.adp_rank]));
+    const adpMap = new Map(currentAdp.map((p) => [normalizeName(p.player_name), p]));
+    const totalAdpPlayers = currentAdp.length;
 
     // Build position → sorted ADP lists for scarcity check
     const positionAdpMap = new Map<string, { name: string; adp: number }[]>();
@@ -232,12 +498,68 @@ export default api({
       if (!positionAdpMap.has(pos)) positionAdpMap.set(pos, []);
       positionAdpMap.get(pos)!.push({ name: normalizeName(p.player_name), adp: p.adp_rank });
     }
-    // Sort each position list by ADP
     for (const list of positionAdpMap.values()) {
       list.sort((a, b) => a.adp - b.adp);
     }
 
-    // Get rookie classes for dynasty factors
+    // ── Step 4: Load current-season Actuals (only when in-season) ──
+    let actualsPercentiles: Map<string, number> | null = null;
+    let playerActualsStats: Map<string, PlayerCutoffStats> | null = null;
+    let playersWithActuals = 0;
+
+    if (phaseInfo.actualsWeight > 0 && phaseInfo.lastCompletedWeek > 0) {
+      try {
+        const weekCutoff = phaseInfo.seasonPhase === "postseason"
+          ? phaseInfo.totalWeeks
+          : phaseInfo.lastCompletedWeek;
+
+        const seasonActuals = await ctx.integrations.apps_db.query(
+          `SELECT player_name, position, season,
+                  week_1, week_2, week_3, week_4, week_5, week_6,
+                  week_7, week_8, week_9, week_10, week_11, week_12,
+                  week_13, week_14, week_15, week_16, week_17, week_18
+           FROM ffwr_season_actuals
+           WHERE season = $1
+           LIMIT 1000`,
+          WeeklyActualsSchema,
+          [CURRENT_SEASON],
+          { label: `Load ${CURRENT_SEASON} actuals through week ${weekCutoff}` },
+        );
+
+        if (seasonActuals.length > 0) {
+          // Compute through-cutoff stats for every player
+          const allPlayerStats: PlayerCutoffStats[] = [];
+          const statsMap = new Map<string, PlayerCutoffStats>();
+
+          for (const row of seasonActuals) {
+            const stats = computeThroughCutoff(row, weekCutoff);
+            const nameNorm = normalizeName(row.player_name);
+            const entry: PlayerCutoffStats = {
+              normalizedName: nameNorm,
+              position: row.position,
+              totalPoints: stats.totalPoints,
+              gamesPlayed: stats.gamesPlayed,
+              ppg: stats.ppg,
+            };
+            allPlayerStats.push(entry);
+            statsMap.set(nameNorm, entry);
+          }
+
+          actualsPercentiles = computePositionalPercentiles(allPlayerStats);
+          playerActualsStats = statsMap;
+          playersWithActuals = allPlayerStats.filter(p => p.gamesPlayed > 0).length;
+
+          ctx.log.info(`Loaded ${seasonActuals.length} actuals rows, ${playersWithActuals} players with games through week ${weekCutoff}`);
+        } else {
+          ctx.log.info(`No actuals data found for ${CURRENT_SEASON} — staying ADP-only`);
+        }
+      } catch (err) {
+        ctx.log.warn(`Failed to load actuals for ${CURRENT_SEASON}: ${err}`);
+        // Graceful fallback — continue with ADP-only
+      }
+    }
+
+    // ── Step 5: Load rookie classes ──
     let rookieClasses: z.infer<typeof RookieSchema>[] = [];
     try {
       rookieClasses = await ctx.integrations.apps_db.query(
@@ -245,16 +567,15 @@ export default api({
          FROM ffwr_rookie_classes LIMIT 1000`,
         RookieSchema,
         undefined,
-        { label: "Fetch rookie classes for dynasty factors" }
+        { label: "Fetch rookie classes for dynasty factors" },
       );
     } catch {
-      // Table may not exist yet — dynasty factors just won't apply
       ctx.log.warn("ffwr_rookie_classes not found — dynasty factors skipped");
     }
 
     const CURRENT_DRAFT_YEAR = 2026;
 
-    // Dynasty multiplier helper — uses mod.* for all tunables
+    // ── Dynasty multiplier helper ──
     function applyDynasty(
       baseValue: number,
       playerName: string,
@@ -268,7 +589,7 @@ export default api({
       const nameNorm = normalizeName(playerName);
       const pos = playerPosition?.toUpperCase() ?? "";
 
-      // 1. Graduated rookie premium (picks 1-128, NFL rounds 1-4)
+      // 1. Graduated rookie premium
       if (mod.rookieHype > 0) {
         const rookieDraftMatch = rookieClasses.find(
           (r) => r.nfl_draft_year === CURRENT_DRAFT_YEAR && r.overall_pick <= ROOKIE_MAX_PICK && normalizeName(r.player_name) === nameNorm,
@@ -281,19 +602,17 @@ export default api({
         }
       }
 
-      // 2. Positional scarcity: top 5 at position
+      // 2. Positional scarcity: top 5
       if (playerAdp !== null) {
         const posList = positionAdpMap.get(pos) ?? [];
         const rank = posList.findIndex((p) => p.name === nameNorm);
         const isTop5 = rank >= 0 && rank < 5;
 
-        // QB scarcity
         if (pos === "QB" && isTop5 && mod.qbScarcity > 1.0) {
           multiplier *= mod.qbScarcity;
           const pct = Math.round((mod.qbScarcity - 1) * 100);
           factors.push(`QB${rank + 1} Scarcity +${pct}%`);
         }
-        // TE premium
         if (pos === "TE" && isTop5 && mod.tePremium > 1.0) {
           multiplier *= mod.tePremium;
           const pct = Math.round((mod.tePremium - 1) * 100);
@@ -301,7 +620,7 @@ export default api({
         }
       }
 
-      // 3. Positional multipliers (RB/WR — applies to ALL, not just top 5)
+      // 3. Positional multipliers (RB/WR)
       if (pos === "RB" && mod.rbPremium !== 1.0) {
         multiplier *= mod.rbPremium;
         const pct = Math.round((mod.rbPremium - 1) * 100);
@@ -313,7 +632,7 @@ export default api({
         factors.push(`WR Adj ${pct >= 0 ? "+" : ""}${pct}%`);
       }
 
-      // 4. Age curve (uses mod.ageCurve to scale deviation)
+      // 4. Age curve
       const rookieEntry = rookieClasses.find((r) => normalizeName(r.player_name) === nameNorm);
       if (rookieEntry && mod.ageCurve > 0) {
         const currentAge = rookieEntry.age_on_draft_day + (CURRENT_DRAFT_YEAR - rookieEntry.nfl_draft_year);
@@ -328,38 +647,106 @@ export default api({
       return { value: baseValue * multiplier, factors };
     }
 
-    // Evaluate one side
+    // ── Step 6: Evaluate one side with Actuals blending ──
     function evaluateSide(assets: z.infer<typeof AssetInputSchema>[]): z.infer<typeof SideResultSchema> {
       const valuations: z.infer<typeof ValuationSchema>[] = [];
 
       for (const asset of assets) {
         if (asset.type === "player") {
           const name = asset.playerName ?? "Unknown";
+          const nameNorm = normalizeName(name);
           let adp = asset.playerAdp ?? null;
-          if (!adp) adp = adpMap.get(normalizeName(name)) ?? null;
+          const adpEntry = adpMap.get(nameNorm);
+          if (!adp && adpEntry) adp = adpEntry.adp_rank;
+          const position = asset.playerPosition ?? adpEntry?.position ?? null;
+
           const rawValue = adp ? calcValue(adp, mod.valueCurve) : 0;
-          const { value, factors } = applyDynasty(rawValue, name, asset.playerPosition ?? null, adp);
+          const { value: dynastyValue, factors } = applyDynasty(rawValue, name, position, adp);
+
           if (adp) {
-            valuations.push({ name, value, adpUsed: adp, dynastyFactors: factors, valueStatus: "resolved" });
+            // Apply Actuals blending if available
+            let finalValue = dynastyValue;
+            let actualsDetail: z.infer<typeof ActualsDetailSchema> | null = null;
+
+            if (actualsPercentiles && playerActualsStats && phaseInfo.actualsWeight > 0) {
+              const percentile = actualsPercentiles.get(nameNorm);
+              const stats = playerActualsStats.get(nameNorm);
+
+              if (percentile != null && percentile > 0 && stats && stats.gamesPlayed > 0) {
+                // Convert percentile to an ADP-equivalent value
+                const actualsAdpEquiv = Math.max(1, Math.round(totalAdpPlayers * (1 - percentile / 100) + 1));
+                const actualsBaseValue = calcValue(actualsAdpEquiv, mod.valueCurve);
+
+                // Blend: final = ADP × (1 - weight) + Actuals × weight
+                const blendedRaw = dynastyValue * (1 - phaseInfo.actualsWeight) + actualsBaseValue * phaseInfo.actualsWeight;
+                finalValue = blendedRaw;
+
+                actualsDetail = {
+                  totalPoints: stats.totalPoints,
+                  gamesPlayed: stats.gamesPlayed,
+                  ppg: stats.ppg,
+                  actualsPercentile: percentile,
+                  adpOnlyValue: Math.round(dynastyValue * 100) / 100,
+                  actualsOnlyValue: Math.round(actualsBaseValue * 100) / 100,
+                  actualsAdjustment: Math.round((finalValue - dynastyValue) * 100) / 100,
+                  finalBlendedValue: Math.round(finalValue * 100) / 100,
+                };
+
+                const adjPct = Math.round(((finalValue - dynastyValue) / dynastyValue) * 100);
+                if (adjPct !== 0) {
+                  factors.push(`Actuals Wk1-${phaseInfo.lastCompletedWeek} ${adjPct >= 0 ? "+" : ""}${adjPct}%`);
+                }
+              }
+              // If player has no actuals data → keep full ADP+dynasty value (no zero assignment)
+            }
+
+            valuations.push({
+              name,
+              value: finalValue,
+              adpUsed: adp,
+              dynastyFactors: factors,
+              valueStatus: "resolved",
+              actualsDetail,
+            });
           } else {
-            // Spec §6: failed ADP lookup → unresolved, not zero
-            valuations.push({ name: `⚠️ ${name} (no ADP)`, value: 0, adpUsed: null, dynastyFactors: ["Unresolved: player not found in ADP data"], valueStatus: "unresolved" });
+            valuations.push({
+              name: `⚠️ ${name} (no ADP)`,
+              value: 0,
+              adpUsed: null,
+              dynastyFactors: ["Unresolved: player not found in ADP data"],
+              valueStatus: "unresolved",
+              actualsDetail: null,
+            });
           }
         } else {
+          // Draft pick — no actuals blending for picks
           const year = asset.pickYear ?? null;
           const round = asset.pickRound ?? 6;
           const pickNum = asset.pickNumber ?? undefined;
           if (year === null) {
-            // Spec §6: missing pick year → mark unresolved, do NOT default to current year
             const pickLabel = pickNum ? `Rd ${round} Pick ${pickNum}` : `Rd ${round}`;
-            valuations.push({ name: `⚠️ ${pickLabel} (no year)`, value: 0, adpUsed: null, dynastyFactors: ["Unresolved: missing pick year"], valueStatus: "unresolved" });
+            valuations.push({
+              name: `⚠️ ${pickLabel} (no year)`,
+              value: 0,
+              adpUsed: null,
+              dynastyFactors: ["Unresolved: missing pick year"],
+              valueStatus: "unresolved",
+              actualsDetail: null,
+            });
           } else {
             const expectedAdp = pickToExpectedAdp(round, year, pickNum);
             const discount = getYearDiscount(year, mod.futurePickDiscount);
             const rawValue = calcValue(expectedAdp, mod.valueCurve);
             const value = rawValue * discount;
             const pickLabel = pickNum ? `${year} Rd ${round} Pick ${pickNum}` : `${year} Rd ${round}`;
-            valuations.push({ name: pickLabel, value, adpUsed: expectedAdp, dynastyFactors: [], valueStatus: "resolved" });
+            valuations.push({
+              name: pickLabel,
+              value,
+              adpUsed: expectedAdp,
+              dynastyFactors: [],
+              valueStatus: "resolved",
+              actualsDetail: null,
+            });
           }
         }
       }
@@ -373,6 +760,7 @@ export default api({
       };
     }
 
+    // ── Step 7: Evaluate both sides ──
     const teamASide = evaluateSide(teamAGives);
     const teamBSide = evaluateSide(teamBGives);
 
@@ -381,12 +769,9 @@ export default api({
       ? ((teamBSide.totalValue - teamASide.totalValue) / avgValue) * 100
       : 0;
 
-    // Spec §5: pctDifference = (teamBSentValue - teamASentValue) / avg
-    // Positive pctDiff means Team B sent more → Team A received more → Team A wins
     const hasAnyUnresolved = teamASide.hasUnresolved || teamBSide.hasUnresolved;
 
     let winningTeamId: number | null = null;
-    // Spec §7: do not present a definitive verdict when material assets are unresolved
     if (!hasAnyUnresolved && Math.abs(pctDifference) > mod.fairTolerance) {
       winningTeamId = pctDifference > 0 ? teamAId : teamBId;
     }
@@ -396,7 +781,20 @@ export default api({
       : getVerdict(pctDifference, mod.fairTolerance, mod.verdictScale);
     const verdictStatus = hasAnyUnresolved ? "incomplete" as const : "definitive" as const;
 
-    // ── Deal Déjà Vu ──
+    // ── Step 8: Build Actuals context for audit ──
+    const actualsContext: z.infer<typeof ActualsContextSchema> = {
+      valuationDate,
+      season: CURRENT_SEASON,
+      seasonPhase: phaseInfo.seasonPhase,
+      lastCompletedWeek: phaseInfo.lastCompletedWeek,
+      weeksIncluded: phaseInfo.seasonPhase === "preseason" ? 0 : phaseInfo.lastCompletedWeek,
+      actualsWeight: phaseInfo.actualsWeight,
+      adpWeight: Math.round((1 - phaseInfo.actualsWeight) * 1000) / 1000,
+      actualsAvailable: playersWithActuals > 0,
+      playersWithActuals,
+    };
+
+    // ── Step 9: Deal Déjà Vu ──
     const playerNamesInTrade = [
       ...teamAGives.filter((a) => a.type === "player").map((a) => a.playerName ? normalizeName(a.playerName) : undefined),
       ...teamBGives.filter((a) => a.type === "player").map((a) => a.playerName ? normalizeName(a.playerName) : undefined),
@@ -405,7 +803,6 @@ export default api({
     const dejaVu: z.infer<typeof DejaVuSchema>[] = [];
 
     if (playerNamesInTrade.length > 0) {
-      // Step 1: Find matching trade IDs, ordered by most recent first
       const TradeMatchSchema = z.object({
         trade_id: z.coerce.number(),
         trade_number: z.coerce.number(),
@@ -432,10 +829,9 @@ export default api({
         LIMIT ${dejaVuLimit}`,
         TradeMatchSchema,
         [playerNamesInTrade],
-        { label: "Find Deal Déjà Vu matches" }
+        { label: "Find Deal Déjà Vu matches" },
       );
 
-      // Sort by trade_date DESC after DISTINCT ON
       matches.sort((a, b) => {
         if (a.trade_date && b.trade_date) return b.trade_date.localeCompare(a.trade_date);
         if (a.trade_date) return -1;
@@ -444,7 +840,6 @@ export default api({
       });
 
       if (matches.length > 0) {
-        // Step 2: Fetch all assets for matched trades
         const tradeIds = matches.map((m) => m.trade_id);
 
         const AssetRowSchema = z.object({
@@ -471,10 +866,9 @@ export default api({
           LIMIT 200`,
           AssetRowSchema,
           [tradeIds],
-          { label: "Fetch Déjà Vu trade assets" }
+          { label: "Fetch Déjà Vu trade assets" },
         );
 
-        // Group assets by trade_id
         const assetsByTradeId = new Map<number, z.infer<typeof AssetRowSchema>[]>();
         for (const asset of allAssets) {
           if (!assetsByTradeId.has(asset.trade_id)) assetsByTradeId.set(asset.trade_id, []);
@@ -484,11 +878,9 @@ export default api({
         for (const match of matches) {
           const tradeAssets = assetsByTradeId.get(match.trade_id) ?? [];
 
-          // Compute a rough historical verdict from the trade's asset values
           let historicalVerdict: { label: string; emoji: string; severity: string } | null = null;
           let winnerName: string | null = null;
 
-          // Use the ADP values recorded at trade time to evaluate
           const teamAAssetValues: number[] = [];
           const teamBAssetValues: number[] = [];
           for (const ta of tradeAssets) {
@@ -497,7 +889,6 @@ export default api({
               : ta.pick_year && ta.pick_round
                 ? calcValue(pickToExpectedAdp(ta.pick_round, ta.pick_year, ta.pick_number ?? undefined), mod.valueCurve)
                 : 0;
-            // Determine which side this asset came from
             if (ta.from_team_name === match.team_a_name) {
               teamAAssetValues.push(val);
             } else {
@@ -549,6 +940,7 @@ export default api({
       winningTeamId,
       verdict,
       verdictStatus,
+      actualsContext,
       dejaVu,
     };
   },
