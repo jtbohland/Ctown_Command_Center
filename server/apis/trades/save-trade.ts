@@ -147,7 +147,7 @@ export default api({
     const tradeId = inserted.id;
 
     // Track cascading updates
-    const pickMoves: Array<{ year: number; round: number; fromTeamId: number; toTeamId: number }> = [];
+    const pickMoves: Array<{ year: number; round: number; fromTeamId: number; toTeamId: number; pickNumber: number | null }> = [];
     const playerMoves: Array<{ playerName: string; toTeamId: number }> = [];
 
     for (const asset of assets) {
@@ -185,6 +185,7 @@ export default api({
             round: asset.pickRound,
             fromTeamId: asset.fromTeamId,
             toTeamId: recipientTeamId,
+            pickNumber: asset.pickNumber ?? null,
           });
         }
       }
@@ -202,28 +203,69 @@ export default api({
     }
 
     // ── Cascade 2: Draft Board (ffwr_draft_picks.team_id) — current year only ──
+    // Uses overall_pick (pickNumber) when available for exact targeting.
+    // Falls back to LIMIT 1 subselect to move only ONE pick when a team holds multiples.
     const CURRENT_DRAFT_YEAR = 2026;
     for (const move of pickMoves) {
       if (move.year === CURRENT_DRAFT_YEAR) {
-        await ctx.integrations.apps_db.execute(
-          `UPDATE ffwr_draft_picks
-           SET team_id = $1
-           WHERE round = $2 AND team_id = $3`,
-          [move.toTeamId, move.round, move.fromTeamId],
-          { label: `Draft board: Rd ${move.round} slot → team ${move.toTeamId}` }
-        );
+        if (move.pickNumber) {
+          // Exact target: overall_pick uniquely identifies a draft board slot
+          await ctx.integrations.apps_db.execute(
+            `UPDATE ffwr_draft_picks
+             SET team_id = $1
+             WHERE overall_pick = $2`,
+            [move.toTeamId, move.pickNumber],
+            { label: `Draft board: pick #${move.pickNumber} → team ${move.toTeamId}` }
+          );
+        } else {
+          // Fallback: move exactly ONE pick for this round owned by fromTeam
+          await ctx.integrations.apps_db.execute(
+            `UPDATE ffwr_draft_picks
+             SET team_id = $1
+             WHERE id = (
+               SELECT id FROM ffwr_draft_picks
+               WHERE round = $2 AND team_id = $3
+               LIMIT 1
+             )`,
+            [move.toTeamId, move.round, move.fromTeamId],
+            { label: `Draft board: Rd ${move.round} slot → team ${move.toTeamId} (one pick)` }
+          );
+        }
       }
     }
 
     // ── Cascade 3: Treasury (ffwr_draft_capital.current_team_id) ──
+    // Uses pickNumber → original_team_id for exact targeting on 2026 picks.
+    // Falls back to LIMIT 1 subselect to move only ONE capital row when a team holds multiples.
     for (const move of pickMoves) {
-      await ctx.integrations.apps_db.execute(
-        `UPDATE ffwr_draft_capital
-         SET current_team_id = $1
-         WHERE year = $2 AND round = $3 AND current_team_id = $4`,
-        [move.toTeamId, move.year, move.round, move.fromTeamId],
-        { label: `Treasury: ${move.year} Rd ${move.round} → team ${move.toTeamId}` }
-      );
+      if (move.year === CURRENT_DRAFT_YEAR && move.pickNumber) {
+        // 2026 with known overall_pick: derive original_team_id from draft board
+        // pick_in_round in ffwr_draft_picks == original_team_id in ffwr_draft_capital
+        // (because team_id == draft_position for all 11 teams)
+        await ctx.integrations.apps_db.execute(
+          `UPDATE ffwr_draft_capital
+           SET current_team_id = $1
+           WHERE year = $2 AND round = $3
+             AND original_team_id = (
+               SELECT pick_in_round FROM ffwr_draft_picks WHERE overall_pick = $4 LIMIT 1
+             )`,
+          [move.toTeamId, move.year, move.round, move.pickNumber],
+          { label: `Treasury: ${move.year} Rd ${move.round} pick #${move.pickNumber} → team ${move.toTeamId}` }
+        );
+      } else {
+        // Future picks or unknown pickNumber: move exactly ONE capital row
+        await ctx.integrations.apps_db.execute(
+          `UPDATE ffwr_draft_capital
+           SET current_team_id = $1
+           WHERE id = (
+             SELECT id FROM ffwr_draft_capital
+             WHERE year = $2 AND round = $3 AND current_team_id = $4
+             LIMIT 1
+           )`,
+          [move.toTeamId, move.year, move.round, move.fromTeamId],
+          { label: `Treasury: ${move.year} Rd ${move.round} → team ${move.toTeamId} (one pick)` }
+        );
+      }
     }
 
     // Build summary
