@@ -312,7 +312,10 @@ export default function SettingsPage() {
                         )}
                       </div>
                       <div className="text-[11px] text-muted-foreground">
-                        {team.manager_name} • Pick #{team.draft_position}
+                        {team.manager_name}
+                        {team.championships > 0 && (
+                          <span className="ml-1.5">{"🏆".repeat(team.championships)}</span>
+                        )}
                       </div>
                     </div>
                   </div>

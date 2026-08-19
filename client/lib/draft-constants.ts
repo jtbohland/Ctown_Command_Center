@@ -99,6 +99,7 @@ export type Team = {
   logo_url: string | null;
   draft_position: number | null;
   is_my_team: boolean;
+  championships: number;
 };
 
 export type DraftPick = {

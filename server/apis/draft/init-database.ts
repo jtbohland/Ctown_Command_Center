@@ -108,6 +108,16 @@ export default api({
       { label: "Ensure columns & constraints" }
     );
 
+    // Add championships column to ffwr_teams if missing
+    await ctx.integrations.apps_db.execute(
+      `DO $$ BEGIN
+        ALTER TABLE ffwr_teams ADD COLUMN IF NOT EXISTS championships INT NOT NULL DEFAULT 0;
+      EXCEPTION WHEN duplicate_column THEN NULL;
+      END $$`,
+      undefined,
+      { label: "Ensure ffwr_teams.championships column" }
+    );
+
     // ── 2. Check if data already seeded ──────────────────────────────
     const countResult = await ctx.integrations.apps_db.query(
       "SELECT COUNT(*) as cnt FROM ffwr_teams",

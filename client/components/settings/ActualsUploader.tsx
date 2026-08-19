@@ -156,7 +156,10 @@ export default function ActualsUploader() {
             <div className="flex flex-wrap gap-1.5">
               {loadedSeasons.seasons.map((s) => (
                 <Badge key={s.season} variant="secondary" className="text-xs">
-                  {s.season} ({s.playerCount})
+                  {s.season}
+                  {s.throughWeek != null && ` · Wk ${s.throughWeek}`}
+                  {s.throughWeek == null && ` · Full`}
+                  {` · ${s.playerCount} players`}
                 </Badge>
               ))}
             </div>
@@ -188,9 +191,10 @@ export default function ActualsUploader() {
               </SelectContent>
             </Select>
             {existingSeasonInfo && (
-              <p className="text-[10px] text-yellow-600 dark:text-yellow-400">
-                Already loaded: {existingSeasonInfo.playerCount} players
-              </p>
+      <p className="text-[10px] text-yellow-600 dark:text-yellow-400">
+              Already loaded: {existingSeasonInfo.playerCount} players
+              {existingSeasonInfo.throughWeek != null && ` (through Wk ${existingSeasonInfo.throughWeek})`}
+            </p>
             )}
           </div>
 
