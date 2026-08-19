@@ -55,6 +55,7 @@ import ProvenanceReport from './trades/provenance-report.js';
 import CanonicalVerdictAudit from './trades/canonical-verdict-audit.js';
 import TakeVerdictSnapshot from './trades/take-verdict-snapshot.js';
 import FantasyWiz from './chat/fantasy-wiz.js';
+import AddChampionships from './draft/add-championships.js';
 
 
 const apis = {
@@ -115,6 +116,7 @@ const apis = {
   CanonicalVerdictAudit,
   TakeVerdictSnapshot,
   FantasyWiz,
+  AddChampionships,
 } as const;
 
 export default apis;
