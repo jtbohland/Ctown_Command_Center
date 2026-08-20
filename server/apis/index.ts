@@ -60,6 +60,7 @@ import InitWaiverTransactions from './waivers/init-waiver-transactions.js';
 import ParseWaiverScreenshot from './waivers/parse-waiver-screenshot.js';
 import ApplyWaiverTransactions from './waivers/apply-waiver-transactions.js';
 import GetWaiverTransactions from './waivers/get-waiver-transactions.js';
+import BackupTables from './settings/backup-tables.js';
 
 
 const apis = {
@@ -125,6 +126,7 @@ const apis = {
   ParseWaiverScreenshot,
   ApplyWaiverTransactions,
   GetWaiverTransactions,
+  BackupTables,
 } as const;
 
 export default apis;
