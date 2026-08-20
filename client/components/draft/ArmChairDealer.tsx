@@ -11,6 +11,7 @@ import GoodBadUgly from "./GoodBadUgly";
 import SirenSale from "./SirenSale";
 import Playbook from "./Playbook";
 import ReduxRosters from "./ReduxRosters";
+import TransactionsTab from "./TransactionsTab";
 
 
 export default function ArmChairDealer() {
@@ -97,7 +98,7 @@ export default function ArmChairDealer() {
             <TabsTrigger value="siren" className="text-xs gap-1">🚨 Sound The Alarm</TabsTrigger>
             <TabsTrigger value="capital" className="text-xs gap-1">💰 The Treasury</TabsTrigger>
             <TabsTrigger value="rosters" className="text-xs gap-1">🏟️ Redux Rosters</TabsTrigger>
-
+            <TabsTrigger value="transactions" className="text-xs gap-1">📇 Transactions</TabsTrigger>
           </TabsList>
         </div>
 
@@ -127,6 +128,10 @@ export default function ArmChairDealer() {
 
         <TabsContent value="rosters" className="flex-1 overflow-auto px-5 py-4">
           <ReduxRosters teams={teams} />
+        </TabsContent>
+
+        <TabsContent value="transactions" className="flex-1 overflow-auto px-5 py-4">
+          <TransactionsTab teams={teams} />
         </TabsContent>
 
       </Tabs>
