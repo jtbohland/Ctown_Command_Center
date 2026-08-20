@@ -14,18 +14,12 @@ import BulkTagHandcuffs from './draft/bulk-tag-handcuffs.js';
 import MergeDuplicatePair from './draft/merge-duplicate-pair.js';
 import BulkTagRookies from './draft/bulk-tag-rookies.js';
 import InitTradeTables from './trades/init-trade-tables.js';
-import SeedDraftCapital from './trades/seed-draft-capital.js';
-import SeedTradeHistory from './trades/seed-trade-history.js';
-import SeedHistoricalAdp from './trades/seed-historical-adp.js';
+// [Phase 1] De-registered destructive seed APIs: SeedDraftCapital, SeedTradeHistory, SeedHistoricalAdp
 import GetTradeData from './trades/get-trade-data.js';
 import EvaluateTrade from './trades/evaluate-trade.js';
 import SaveTrade from './trades/save-trade.js';
-import SeedHistoricalAdpV2 from './trades/seed-historical-adp-v2.js';
-import SeedHistoricalTradesV2 from './trades/seed-historical-trades-v2.js';
-import ReseedTradesFromCsv from './trades/reseed-trades-from-csv.js';
-import DedupTrades from './trades/dedup-trades.js';
-import SeedRookieClasses from './trades/seed-rookie-classes.js';
-import SeedAdpFromCsv from './trades/seed-adp-from-csv.js';
+// [Phase 1] De-registered destructive seed APIs: SeedHistoricalAdpV2, SeedHistoricalTradesV2,
+// ReseedTradesFromCsv, DedupTrades, SeedRookieClasses, SeedAdpFromCsv
 import DataQualityCheck from './trades/data-quality-check.js';
 import BackfillPickYear from './trades/backfill-pick-year.js';
 import MigrateThreeTeam from './trades/migrate-three-team.js';
@@ -33,9 +27,9 @@ import BackfillTwoTeamDefaults from './trades/backfill-two-team-defaults.js';
 import RepairThreeTeamTrades from './trades/repair-three-team-trades.js';
 import InitSeasonActuals from './trades/init-season-actuals.js';
 import InitCanonicalPlayers from './trades/init-canonical-players.js';
-import BuildPlayerIdentityMap from './trades/build-player-identity-map.js';
+// [Phase 1] De-registered: BuildPlayerIdentityMap (destructive — wipes canonical_players)
 import InitPlayerScores from './trades/init-player-scores.js';
-import BuildActualsScores from './trades/build-actuals-scores.js';
+// [Phase 1] De-registered: BuildActualsScores (destructive — wipes player_scores)
 import SeedActualsFromFile from './trades/seed-actuals-from-file.js';
 import GetLoadedActualSeasons from './trades/get-loaded-actual-seasons.js';
 import RepairTrade28Assets from './trades/repair-trade-28-assets.js';
@@ -80,18 +74,11 @@ const apis = {
   MergeDuplicatePair,
   BulkTagRookies,
   InitTradeTables,
-  SeedDraftCapital,
-  SeedTradeHistory,
-  SeedHistoricalAdp,
+
   GetTradeData,
   EvaluateTrade,
   SaveTrade,
-  SeedHistoricalAdpV2,
-  SeedHistoricalTradesV2,
-  ReseedTradesFromCsv,
-  DedupTrades,
-  SeedRookieClasses,
-  SeedAdpFromCsv,
+
   DataQualityCheck,
   BackfillPickYear,
   MigrateThreeTeam,
@@ -101,9 +88,9 @@ const apis = {
   SeedActualsFromFile,
   GetLoadedActualSeasons,
   InitCanonicalPlayers,
-  BuildPlayerIdentityMap,
+
   InitPlayerScores,
-  BuildActualsScores,
+
   RepairTrade28Assets,
   ComputeTradeActuals,
   SeedRosters,

@@ -10,15 +10,13 @@ export default api({
     apps_db: postgres(APPS_DB),
   },
 
-  input: z.object({
-    force: z.boolean().optional().default(false),
-  }),
+  input: z.object({}),  // [Phase 1] force flag removed — no destructive reset allowed
 
   output: z.object({
     message: z.string(),
   }),
 
-  async run(ctx, { force }) {
+  async run(ctx) {
     // ── 1. Create tables ────────────────────────────────────────────
     await ctx.integrations.apps_db.execute(
       `CREATE TABLE IF NOT EXISTS ffwr_teams (
@@ -125,12 +123,10 @@ export default api({
       undefined,
       { label: "Check team count" }
     );
-    if (countResult[0].cnt > 0 && !force) {
+    if (countResult[0].cnt > 0) {
       return { message: "Database already initialized. Use Settings to re-seed or upload CSVs." };
     }
-    if (force) {
-      await ctx.integrations.apps_db.execute("TRUNCATE ffwr_draft_picks, ffwr_player_tags, ffwr_players, ffwr_teams RESTART IDENTITY CASCADE", undefined, { label: "Force reset: truncate all tables" });
-    }
+    // [Phase 1] TRUNCATE path removed — tables can only be created, never force-wiped
 
     // ── 3. Seed 11 real teams ─────────────────────────────────────────
     const teams = [

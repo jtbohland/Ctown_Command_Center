@@ -135,7 +135,7 @@ export default function WarRoom() {
 
   const handleInitDb = useCallback(async () => {
     try {
-      const result = await initDb({ force: false });
+      const result = await initDb({});
       toast.success(result?.message ?? "Database initialized!");
       await queryClient.invalidateQueries("GetPlayers");
       await queryClient.invalidateQueries("GetTeams");
