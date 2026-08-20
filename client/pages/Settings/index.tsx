@@ -15,6 +15,7 @@ import { getTeamEmoji } from "@/lib/draft-constants";
 import ctownReduxLogo from "@/public/logos/ctown-redux.png";
 import ActualsUploader from "@/components/settings/ActualsUploader";
 import LeagueOfRecord from "@/components/settings/LeagueOfRecord";
+import WaiverUploader from "@/components/settings/WaiverUploader";
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -439,6 +440,9 @@ export default function SettingsPage() {
 
         {/* Actuals Uploader */}
         <ActualsUploader />
+
+        {/* Waiver Wire Uploader */}
+        <WaiverUploader />
 
         {/* The League of Record — historical CSV archive */}
         <LeagueOfRecord />

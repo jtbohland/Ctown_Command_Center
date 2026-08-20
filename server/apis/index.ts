@@ -56,6 +56,10 @@ import CanonicalVerdictAudit from './trades/canonical-verdict-audit.js';
 import TakeVerdictSnapshot from './trades/take-verdict-snapshot.js';
 import FantasyWiz from './chat/fantasy-wiz.js';
 import AddChampionships from './draft/add-championships.js';
+import InitWaiverTransactions from './waivers/init-waiver-transactions.js';
+import ParseWaiverScreenshot from './waivers/parse-waiver-screenshot.js';
+import ApplyWaiverTransactions from './waivers/apply-waiver-transactions.js';
+import GetWaiverTransactions from './waivers/get-waiver-transactions.js';
 
 
 const apis = {
@@ -117,6 +121,10 @@ const apis = {
   TakeVerdictSnapshot,
   FantasyWiz,
   AddChampionships,
+  InitWaiverTransactions,
+  ParseWaiverScreenshot,
+  ApplyWaiverTransactions,
+  GetWaiverTransactions,
 } as const;
 
 export default apis;
