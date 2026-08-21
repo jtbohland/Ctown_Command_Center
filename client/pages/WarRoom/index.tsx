@@ -20,6 +20,8 @@ import DraftRecap from "@/components/draft/DraftRecap";
 import MockDraftTab from "@/components/draft/MockDraftTab";
 import ArmChairDealer from "@/components/draft/ArmChairDealer";
 import DraftPickDialog from "@/components/draft/DraftPickDialog";
+import RivalScout from "@/components/draft/RivalScout";
+import DraftDayTradeModal from "@/components/draft/DraftDayTradeModal";
 import type { TagKey, Player } from "@/lib/draft-constants";
 import ctownReduxLogo from "@/public/logos/ctown-redux.png";
 
@@ -41,6 +43,7 @@ export default function WarRoom() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [mainView, setMainView] = useState<MainView>("board");
   const [sidePanel, setSidePanel] = useState<SidePanel>("tracker");
+  const [tradeModalOpen, setTradeModalOpen] = useState(false);
 
   const players = playersData?.players ?? [];
   const teams = teamsData?.teams ?? [];
@@ -294,6 +297,18 @@ export default function WarRoom() {
 
         <div className="flex-1" />
 
+        {/* Sound the Alarm — draft day trade button */}
+        {mainView === "board" && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs px-3 text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/20"
+            onClick={() => setTradeModalOpen(true)}
+          >
+            🚨 Trade Alert
+          </Button>
+        )}
+
         {/* Pick Timer */}
         {mainView === "board" && (
           <PickTimer isMyPick={isMyPick} currentPickId={currentPick?.id ?? null} />
@@ -370,6 +385,16 @@ export default function WarRoom() {
             onDraft={handleDraft}
           />
 
+          {/* Rival Scout — next 3 pickers' RB/WR needs */}
+          <div className="px-4 py-1.5">
+            <RivalScout
+              players={players}
+              teams={teams}
+              picks={picks}
+              currentPickId={currentPick?.id ?? null}
+            />
+          </div>
+
           {/* Board + Side Panel */}
           <div className="flex-1 flex overflow-hidden">
             {/* Left Panel — Player Board */}
@@ -419,6 +444,14 @@ export default function WarRoom() {
         onOpenChange={setDialogOpen}
         onConfirm={handleConfirmDraft}
         loading={draftingPlayer}
+      />
+
+      {/* Draft Day Trade Modal */}
+      <DraftDayTradeModal
+        open={tradeModalOpen}
+        onOpenChange={setTradeModalOpen}
+        teams={teams}
+        picks={picks}
       />
     </div>
   );
