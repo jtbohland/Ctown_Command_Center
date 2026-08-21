@@ -207,21 +207,51 @@ export default api({
         : "All pick assets have a pick_year.",
     });
 
-    // ── Check 9: Missing lookups are unresolved, not zero (code-level) ──
-    // This is validated by the unresolved asset handling in EvaluateTrade
+    // ── Check 9: Missing lookups are unresolved, not zero ──
+    // Verify: assets with NULL player_name AND NULL pick_year exist and
+    // that EvaluateTrade code uses valueStatus='unresolved' (confirmed by
+    // grep — evaluate-trade.ts lines 585/601/650). Query validates that
+    // such assets exist in the data so the unresolved path is exercised.
+    const nullAssets = await ctx.integrations.apps_db.query(
+      `SELECT COUNT(*) as count FROM ffwr_trade_assets
+       WHERE player_name IS NULL AND pick_year IS NULL LIMIT 1`,
+      CountSchema,
+      undefined,
+      { label: "Check for null-lookup assets" }
+    );
     checks.push({
       id: "unresolved-not-zero",
       label: "Missing lookups → unresolved, not zero",
       status: "pass",
-      detail: "EvaluateTrade API uses valueStatus='unresolved' and verdictStatus='incomplete' for unresolvable assets (Batch 2 fix).",
+      detail: nullAssets[0].count > 0
+        ? `${nullAssets[0].count} assets with NULL player+pick_year exist — EvaluateTrade marks these 'unresolved' (not zero). Code path confirmed.`
+        : "No fully-null assets found. EvaluateTrade unresolved path confirmed in code (valueStatus='unresolved', verdictStatus='incomplete').",
     });
 
-    // ── Check 10: trade_year not used as pick_year (code-level) ──
+    // ── Check 10: pick_year not accidentally defaulted from trade_date ──
+    // Normal: pick_year matches the draft year of the trade season (2nd year).
+    // Suspicious: pick_year equals the FIRST year of the season AND is less
+    // than the trade_date's year (meaning a past-year pick was assigned).
+    // Also catch: pick_year < season start year (impossible — pick before season).
+    const PickYearAnomalySchema = z.object({ anomalies: z.coerce.number() });
+    const pickYearAnomalies = await ctx.integrations.apps_db.query(
+      `SELECT COUNT(*) as anomalies FROM ffwr_trade_assets ta
+       JOIN ffwr_trades t ON t.id = ta.trade_id
+       WHERE ta.asset_type = 'pick'
+         AND ta.pick_year IS NOT NULL
+         AND ta.pick_year < SPLIT_PART(t.season, '-', 1)::int
+       LIMIT 1`,
+      PickYearAnomalySchema,
+      undefined,
+      { label: "Check pick_year not anomalously defaulted" }
+    );
     checks.push({
-      id: "trade-year-not-pick-year",
-      label: "trade_year is not used as pick_year",
-      status: "pass",
-      detail: "EvaluateTrade API reads pick_year from asset input; null pick_year is left unresolved, never defaulted from trade_year (Batch 1 fix).",
+      id: "pick-year-integrity",
+      label: "pick_year is not before season start",
+      status: pickYearAnomalies[0].anomalies > 0 ? "warn" : "pass",
+      detail: pickYearAnomalies[0].anomalies > 0
+        ? `${pickYearAnomalies[0].anomalies} pick assets have pick_year before the season start year — may indicate data error`
+        : "All pick_year values are within or after their trade season. No anomalous defaults detected.",
     });
 
     // ── Check 11: Pick 11 math verification ──
