@@ -69,9 +69,9 @@ const DraftOrderRow = memo(function DraftOrderRow({
         isMine ? "bg-primary/10 border border-primary/30" : ""
       }`}
     >
-      {/* Pick slot: round.original_team_id (the original draft slot) */}
+      {/* Pick slot label: use actual pick_in_round when available, fall back to round indicator */}
       <span className="text-[10px] font-mono text-muted-foreground w-7 text-right shrink-0">
-        {pick.round}.{String(pick.original_team_id).padStart(2, "0")}
+        {pick.round}.{String(pick.pick_in_round ?? pick.original_team_id).padStart(2, "0")}
       </span>
 
       {/* Team color dot */}
@@ -227,22 +227,24 @@ export default function DraftCapitalView({ draftCapital, teams, draftPicks2026 }
   // Draft tracker: ordered picks for the selected year
   const trackerPicks = useMemo(() => {
     const yr = Number(yearFilter);
-    // Build pick order: round × team (by draft_position or team id)
-    const sortedTeams = [...teams].sort((a, b) => a.id - b.id);
-    const picks: DraftCapitalRow[] = [];
-    for (let round = 1; round <= TOTAL_ROUNDS; round++) {
-      for (const team of sortedTeams) {
-        // Find who owns this pick
-        const pick = allPicks.find(
-          (p) => p.year === yr && p.round === round && p.original_team_id === team.id
-        );
-        if (pick) {
-          picks.push(pick);
-        }
+
+    // For 2026, capital2026 rows carry actual pick_in_round/overall_pick from
+    // the draft board — sort by those to get the true draft order.
+    // For other years, fall back to sorting by round then original_team_id.
+    const yearPicks = allPicks.filter((p) => p.year === yr);
+    yearPicks.sort((a, b) => {
+      if (a.round !== b.round) return a.round - b.round;
+      // Use overall_pick when available (2026 merged rows)
+      if (a.overall_pick != null && b.overall_pick != null) {
+        return a.overall_pick - b.overall_pick;
       }
-    }
-    return picks;
-  }, [yearFilter, allPicks, teams]);
+      // Fall back: pick_in_round, then original_team_id
+      const slotA = a.pick_in_round ?? a.original_team_id;
+      const slotB = b.pick_in_round ?? b.original_team_id;
+      return slotA - slotB;
+    });
+    return yearPicks;
+  }, [yearFilter, allPicks]);
 
   const trackerRounds = useMemo(() => {
     const r = new Set(trackerPicks.map((p) => p.round));
