@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Icon } from "@/components/ui/icon";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import PositionBadge from "./PositionBadge";
-import { getTagEmoji, getPlayerSos, getPlayerVegas, getRookieStarDisplay, getKeeperWindow, STARTING_SLOTS, type Player, type Team, type KeeperWindow } from "@/lib/draft-constants";
+import { getTagEmoji, getPlayerSos, getPlayerVegas, getRookieStarDisplay, getKeeperWindow, getTeamEmoji, STARTING_SLOTS, type Player, type Team, type DraftPick, type KeeperWindow } from "@/lib/draft-constants";
 import RatingBars, { parseRatingString } from "./RatingBars";
 import { VegasBar } from "./VegasBar";
 import FallingBoard from "./FallingBoard";
@@ -15,6 +15,8 @@ type SmartSuggestionsProps = {
   isMyPick: boolean;
   currentOverallPick: number;
   onDraft: (playerId: number) => void;
+  teams: Team[];
+  picks: DraftPick[];
 };
 
 type ScoreBreakdown = {
@@ -605,7 +607,7 @@ const ALL_PLAYERS_PAGE_SIZE = 25;
 
 // ─── Main Component ─────────────────────────────────────────
 
-export default function SmartSuggestions({ players, myTeam, isMyPick, currentOverallPick, onDraft }: SmartSuggestionsProps) {
+export default function SmartSuggestions({ players, myTeam, isMyPick, currentOverallPick, onDraft, teams, picks }: SmartSuggestionsProps) {
   const [expandLevel, setExpandLevel] = useState(0);
   const [viewMode, setViewMode] = useState<"smart" | "all">("smart");
   const [allPage, setAllPage] = useState(0);
@@ -640,6 +642,55 @@ export default function SmartSuggestions({ players, myTeam, isMyPick, currentOve
     () => computeAllScored(players, myTeam, currentOverallPick),
     [players, myTeam, currentOverallPick],
   );
+
+  // ── Rival Scout: next 3 non-JT pickers' RB/WR needs ──
+  const rivals = useMemo(() => {
+    if (!picks.length || !teams.length) return [];
+    // Find the current pick by overall_pick number
+    const currentIdx = picks.findIndex(
+      (p) => p.overall_pick === currentOverallPick && !p.is_complete,
+    );
+    if (currentIdx === -1) return [];
+
+    const upcoming: { pick: DraftPick; gap: number }[] = [];
+    let count = 0;
+    for (let i = currentIdx + 1; i < picks.length && upcoming.length < 3; i++) {
+      count++;
+      const pk = picks[i];
+      if (pk.is_complete || pk.team_id === myTeam?.id) continue;
+      upcoming.push({ pick: pk, gap: count });
+    }
+
+    return upcoming.map(({ pick: pk, gap }) => {
+      const team = teams.find((t) => t.id === pk.team_id);
+      const roster = players.filter(
+        (p) =>
+          (p.is_drafted && p.drafted_team_id === pk.team_id) ||
+          (p.is_keeper && p.keeper_team_id === pk.team_id),
+      );
+      const rbCount = roster.filter((p) => p.position === "RB").length;
+      const wrCount = roster.filter((p) => p.position === "WR").length;
+      // Simple starter-threshold needs
+      let rbSlots = 0;
+      let wrSlots = 0;
+      for (const slot of STARTING_SLOTS) {
+        if ((slot.positions as readonly string[]).includes("RB")) rbSlots++;
+        if ((slot.positions as readonly string[]).includes("WR")) wrSlots++;
+      }
+      const rbNeed = Math.max(0, rbSlots - rbCount);
+      const wrNeed = Math.max(0, wrSlots - wrCount);
+      const rbLevel: 0 | 1 | 2 = rbNeed >= 2 ? 2 : rbNeed >= 1 ? 1 : 0;
+      const wrLevel: 0 | 1 | 2 = wrNeed >= 2 ? 2 : wrNeed >= 1 ? 1 : 0;
+
+      return {
+        teamName: team?.team_name ?? "Unknown",
+        pickLabel: `${pk.round}.${String(pk.pick_in_round).padStart(2, "0")}`,
+        gap,
+        rb: { level: rbLevel, filled: rbCount, needed: rbNeed },
+        wr: { level: wrLevel, filled: wrCount, needed: wrNeed },
+      };
+    });
+  }, [picks, teams, players, currentOverallPick, myTeam?.id]);
 
   // Smart picks (top N)
   const maxResults = EXPAND_OPTIONS[expandLevel].total;
@@ -697,6 +748,31 @@ export default function SmartSuggestions({ players, myTeam, isMyPick, currentOve
         <span className="text-[9px] text-muted-foreground/60 ml-1">
           55 expert · 25 fit · 8 keeper · 10 tags · 5 tiebreak
         </span>
+
+        {/* Rival Scout pills — next 3 pickers' RB/WR needs */}
+        {rivals.length > 0 && (
+          <div className="flex items-center gap-1.5 ml-3 pl-3 border-l border-border/40">
+            <span className="text-[10px] text-muted-foreground/50">🎯</span>
+            {rivals.map((r, i) => {
+              const maxLevel = Math.max(r.rb.level, r.wr.level);
+              const pillBorder = maxLevel === 2 ? "border-red-500/30" : maxLevel === 1 ? "border-amber-500/25" : "border-border/40";
+              const pillBg = maxLevel === 2 ? "bg-red-500/8" : maxLevel === 1 ? "bg-amber-500/8" : "bg-card/40";
+              const levelIcon = (l: number) => l === 2 ? "🔴" : l === 1 ? "🟡" : "✅";
+              return (
+                <span
+                  key={i}
+                  className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[9px] font-semibold ${pillBorder} ${pillBg}`}
+                  title={`${r.teamName} (${r.pickLabel}, ${r.gap === 1 ? "next" : `+${r.gap}`}) — RB: ${r.rb.filled} rostered, needs ${r.rb.needed} · WR: ${r.wr.filled} rostered, needs ${r.wr.needed}`}
+                >
+                  <span className="text-[8px] text-muted-foreground/60">{r.gap === 1 ? "next" : `+${r.gap}`}</span>
+                  <span className="truncate max-w-[52px]">{getTeamEmoji(r.teamName)}{r.teamName.split(" ")[0]}</span>
+                  <span>{levelIcon(r.rb.level)}<span className="font-bold">RB</span></span>
+                  <span>{levelIcon(r.wr.level)}<span className="font-bold">WR</span></span>
+                </span>
+              );
+            })}
+          </div>
+        )}
 
         {/* View Mode toggle */}
         <div className="flex items-center gap-1 bg-secondary/40 rounded-md p-0.5 ml-auto">

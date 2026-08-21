@@ -15,6 +15,7 @@ import InitTradeTables from './trades/init-trade-tables.js';
 import GetTradeData from './trades/get-trade-data.js';
 import EvaluateTrade from './trades/evaluate-trade.js';
 import SaveTrade from './trades/save-trade.js';
+import PersistTradeVerdict from './trades/persist-trade-verdict.js';
 // [Phase 1] De-registered destructive seed APIs: SeedHistoricalAdpV2, SeedHistoricalTradesV2,
 // ReseedTradesFromCsv, DedupTrades, SeedRookieClasses, SeedAdpFromCsv
 import DataQualityCheck from './trades/data-quality-check.js';
@@ -67,6 +68,7 @@ const apis = {
   GetTradeData,
   EvaluateTrade,
   SaveTrade,
+  PersistTradeVerdict,
 
   DataQualityCheck,
 

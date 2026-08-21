@@ -51,9 +51,11 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
   const [teamAAssets, setTeamAAssets] = useState<Asset[]>([]);
   const [teamBAssets, setTeamBAssets] = useState<Asset[]>([]);
   const [teamCAssets, setTeamCAssets] = useState<Asset[]>([]);
-  const [recentSaves, setRecentSaves] = useState<{ tradeNumber: number; teamA: string; teamB: string; teamC?: string; playersMoved: number; picksMoved: number }[]>([]);
+  const [recentSaves, setRecentSaves] = useState<{ tradeNumber: number; teamA: string; teamB: string; teamC?: string; playersMoved: number; picksMoved: number; verdictEmoji?: string; verdictLabel?: string }[]>([]);
 
   const { run: saveTrade, loading: saving } = useApi("SaveTrade");
+  const { run: evaluateTrade } = useApi("EvaluateTrade");
+  const { run: persistVerdict } = useApi("PersistTradeVerdict");
 
   // Teams already selected (for filtering dropdowns)
   const selectedTeamIds = useMemo(() => {
@@ -176,11 +178,62 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
         dryRun: false,
       });
 
-      toast.success(`🚨 ${res?.message ?? "Trade saved!"}`);
-
       const teamAName = teams.find((t) => t.id === teamAId)?.team_name ?? "";
       const teamBName = teams.find((t) => t.id === teamBId)?.team_name ?? "";
       const teamCName = teamCId ? (teams.find((t) => t.id === teamCId)?.team_name ?? "") : undefined;
+
+      // Evaluate verdict (best-effort — trade is already saved)
+      let verdictEmoji: string | undefined;
+      let verdictLabel: string | undefined;
+      try {
+        const teamAGivesEval = teamAAssets.map((a) => ({
+          type: a.type,
+          playerName: a.playerName,
+          playerPosition: a.playerPosition,
+          playerAdp: null,
+          pickYear: a.pickYear,
+          pickRound: a.pickRound,
+          pickNumber: a.pickNumber,
+        }));
+        const teamBGivesEval = teamBAssets.map((a) => ({
+          type: a.type,
+          playerName: a.playerName,
+          playerPosition: a.playerPosition,
+          playerAdp: null,
+          pickYear: a.pickYear,
+          pickRound: a.pickRound,
+          pickNumber: a.pickNumber,
+        }));
+        const evalResult = await evaluateTrade({
+          teamAId,
+          teamBId,
+          teamAGives: teamAGivesEval,
+          teamBGives: teamBGivesEval,
+          modifiers: null,
+        });
+        if (evalResult?.verdict) {
+          verdictEmoji = evalResult.verdict.emoji;
+          verdictLabel = evalResult.verdict.label;
+          // Persist verdict to DB (fire-and-forget — don't block UI)
+          persistVerdict({
+            tradeId: res?.tradeId ?? 0,
+            verdictLabel: evalResult.verdict.label,
+            verdictEmoji: evalResult.verdict.emoji,
+            verdictSeverity: evalResult.verdict.severity,
+            winnerTeamId: evalResult.winningTeamId ?? null,
+            pctDifference: evalResult.pctDifference ?? 0,
+            teamATotal: evalResult.teamASide?.totalValue ?? 0,
+            teamBTotal: evalResult.teamBSide?.totalValue ?? 0,
+            teamCTotal: null,
+          }).catch(() => {
+            // Best-effort — verdict is still shown in UI
+          });
+        }
+      } catch {
+        // Evaluation is optional — trade is already saved
+      }
+
+      toast.success(`🚨 Trade #${res?.tradeNumber ?? 0} logged! ${verdictEmoji ?? "✅"} ${verdictLabel ?? "Saved"}`);
 
       setRecentSaves((prev) => [
         {
@@ -190,6 +243,8 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
           teamC: teamCName,
           playersMoved: res?.playersMovedCount ?? 0,
           picksMoved: res?.picksMovedCount ?? 0,
+          verdictEmoji,
+          verdictLabel,
         },
         ...prev,
       ]);
@@ -208,7 +263,7 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
         : String(err);
       toast.error("Save failed: " + message);
     }
-  }, [teamAId, teamBId, teamCId, wildCardEnabled, season, period, notes, teamAAssets, teamBAssets, teamCAssets, saveTrade, teams, onSaved]);
+  }, [teamAId, teamBId, teamCId, wildCardEnabled, season, period, notes, teamAAssets, teamBAssets, teamCAssets, saveTrade, evaluateTrade, persistVerdict, teams, onSaved]);
 
   const [sirenActive, setSirenActive] = useState(false);
 
@@ -453,6 +508,11 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
                       <span className="text-muted-foreground">↔</span>
                       <span>🎰 {s.teamC.split(" ")[0]}</span>
                     </>
+                  )}
+                  {s.verdictEmoji && s.verdictLabel && (
+                    <span className="ml-auto text-[10px] font-semibold text-amber-400/90">
+                      {s.verdictEmoji} {s.verdictLabel}
+                    </span>
                   )}
                 </div>
                 {(s.playersMoved > 0 || s.picksMoved > 0) && (
