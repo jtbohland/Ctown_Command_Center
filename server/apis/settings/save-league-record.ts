@@ -1,4 +1,5 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
+import { requireAdmin } from "../../lib/auth/require-admin.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
@@ -24,21 +25,13 @@ export default api({
   }),
 
   async run(ctx, { category, season, filename, fileContent, notes }) {
-    // Ensure table exists
-    await ctx.integrations.apps_db.execute(
-      `CREATE TABLE IF NOT EXISTS ffwr_league_records (
-        id SERIAL PRIMARY KEY,
-        category VARCHAR(100) NOT NULL,
-        season VARCHAR(20),
-        filename VARCHAR(255) NOT NULL,
-        file_content TEXT NOT NULL,
-        uploaded_at TIMESTAMPTZ DEFAULT NOW(),
-        uploaded_by VARCHAR(255),
-        notes TEXT
-      )`,
-      undefined,
-      { label: "Ensure ffwr_league_records table exists" }
-    );
+    // Verified server-side from the signed JWT — also used for attribution below.
+    const admin = requireAdmin(ctx, "archive a league record");
+
+    // [Phase 4] Explicit error state instead of silently archiving an empty file.
+    if (fileContent.trim().length === 0) {
+      throw new Error(`Refusing to archive "${filename}": the file is empty.`);
+    }
 
     const InsertedSchema = z.object({ id: z.coerce.number() });
     const rows = await ctx.integrations.apps_db.query(
@@ -46,7 +39,7 @@ export default api({
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id`,
       InsertedSchema,
-      [category, season, filename, fileContent, ctx.user?.email ?? "unknown", notes],
+      [category, season, filename, fileContent, admin, notes],
       { label: "Insert league record" }
     );
 

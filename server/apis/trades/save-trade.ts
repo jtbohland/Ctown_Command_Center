@@ -1,5 +1,6 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
 import { CURRENT_DRAFT_YEAR } from "../../lib/valuation/valuation-spec.js";
+import { requireAdmin } from "../../lib/auth/require-admin.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
@@ -52,6 +53,11 @@ export default api({
 
   async run(ctx, { teamAId, teamBId, teamCId, season, period, notes, assets, dryRun }) {
     const isDryRun = dryRun === true;
+
+    // Authorization gate — must run before any query or write.
+    // Enforced even for dry runs so the preview path cannot be used to probe
+    // league data (duplicate detection reads real trades).
+    requireAdmin(ctx, isDryRun ? "preview a trade" : "save a trade");
     const isThreeTeam = teamCId != null;
     const tradeType = isThreeTeam ? "three-team" : "two-team";
     const participantCount = isThreeTeam ? 3 : 2;

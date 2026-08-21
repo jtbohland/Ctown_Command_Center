@@ -1,4 +1,5 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
+import { requireAdmin } from "../../lib/auth/require-admin.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
@@ -14,6 +15,8 @@ export default api({
   output: z.object({ message: z.string() }),
 
   async run(ctx) {
+    requireAdmin(ctx, "initialize the canonical players table");
+
     await ctx.integrations.apps_db.execute(`
       CREATE TABLE IF NOT EXISTS ffwr_canonical_players (
         id SERIAL PRIMARY KEY,
