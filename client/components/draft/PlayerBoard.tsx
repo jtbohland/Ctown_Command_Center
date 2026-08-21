@@ -19,11 +19,12 @@ type PlayerBoardProps = {
     nfl_team: string;
     bye_week: number | null;
   }) => void;
+  onTradeAlert?: () => void;
 };
 
 const POSITIONS = ["ALL", "QB", "RB", "WR", "TE"] as const;
 
-export default function PlayerBoard({ players, onDraft, onToggleTag, onWriteInCreated }: PlayerBoardProps) {
+export default function PlayerBoard({ players, onDraft, onToggleTag, onWriteInCreated, onTradeAlert }: PlayerBoardProps) {
   const [search, setSearch] = useState("");
   const [posFilter, setPosFilter] = useState<string>("ALL");
   const [tagFilter, setTagFilter] = useState<string | null>(null);
@@ -127,6 +128,15 @@ export default function PlayerBoard({ players, onDraft, onToggleTag, onWriteInCr
             >
               ✏️ Write In
             </Button>
+            {onTradeAlert && (
+              <Button
+                size="sm"
+                className="h-6 px-2.5 text-xs font-semibold bg-red-600 hover:bg-red-500 text-white border-0 shadow-md shadow-red-900/30"
+                onClick={onTradeAlert}
+              >
+                🚨 Trade Alert
+              </Button>
+            )}
           </div>
         </div>
 
