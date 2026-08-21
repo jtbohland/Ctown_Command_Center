@@ -1,5 +1,6 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
 import { normalizeName } from "../../lib/normalize-trade-name.js";
+import { requireAdmin } from "../../lib/auth/require-admin.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
@@ -47,6 +48,13 @@ export default api({
   }),
 
   async run(ctx, { transactions, season }) {
+    requireAdmin(ctx, "apply waiver transactions");
+
+    // [Phase 4] Explicit error state — refuse empty batches
+    if (transactions.length === 0) {
+      throw new Error("No transactions to apply. Parse a waiver screenshot first.");
+    }
+
     let applied = 0;
     let skippedDuplicates = 0;
     let playersCreated = 0;

@@ -1,4 +1,5 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
+import { requireAdmin } from "../../lib/auth/require-admin.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
@@ -20,6 +21,8 @@ export default api({
   }),
 
   async run(ctx, { playerId, pickId }) {
+    requireAdmin(ctx, "draft a player");
+
     // Get the pick info
     const picks = await ctx.integrations.apps_db.query(
       "SELECT team_id, round, pick_in_round FROM ffwr_draft_picks WHERE id = $1",

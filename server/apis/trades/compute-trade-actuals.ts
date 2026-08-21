@@ -1,5 +1,6 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
 import { normalizeName } from "../../lib/normalize-trade-name.js";
+import { requireAdmin } from "../../lib/auth/require-admin.js";
 import {
   computeActualsValue,
   getSeasonPhaseInfo as getCanonicalSeasonPhaseInfo,
@@ -272,6 +273,8 @@ export default api({
   }),
 
   async run(ctx, { trades }) {
+    requireAdmin(ctx, "compute trade actuals");
+
     if (trades.length === 0) {
       return {
         results: [],

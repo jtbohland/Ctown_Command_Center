@@ -34,13 +34,6 @@ export default api({
   }),
 
   async run(ctx) {
-    // Ensure the is_write_in column exists (idempotent, no-op after first run)
-    await ctx.integrations.apps_db.execute(
-      "ALTER TABLE ffwr_players ADD COLUMN IF NOT EXISTS is_write_in BOOLEAN DEFAULT FALSE",
-      undefined,
-      { label: "Ensure is_write_in column" },
-    );
-
     const picks = await ctx.integrations.apps_db.query(
       `SELECT dp.id, dp.round, dp.pick_in_round, dp.overall_pick, dp.team_id,
               t.team_name, t.color as team_color, CASE WHEN t.is_my_team THEN true ELSE false END as is_my_team,

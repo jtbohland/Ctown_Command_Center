@@ -1,5 +1,6 @@
 import { api, z, postgres, readableFileSchema } from "@superblocksteam/sdk-api";
 import { normalizePlayerName } from "../../lib/normalize-player-name.js";
+import { requireAdmin } from "../../lib/auth/require-admin.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
@@ -26,6 +27,8 @@ export default api({
   }),
 
   async run(ctx, { csvFile, mode }) {
+    requireAdmin(ctx, `upload players (${mode} mode)`);
+
     const file = csvFile.files[0];
     const content = await file.readContentsAsync();
     const text = typeof content === "string" ? content : String(content);

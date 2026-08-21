@@ -48,13 +48,6 @@ export default api({
   }),
 
   async run(ctx) {
-    // Ensure the is_write_in column exists (idempotent, no-op after first run)
-    await ctx.integrations.apps_db.execute(
-      "ALTER TABLE ffwr_players ADD COLUMN IF NOT EXISTS is_write_in BOOLEAN DEFAULT FALSE",
-      undefined,
-      { label: "Ensure is_write_in column" },
-    );
-
     const players = await ctx.integrations.apps_db.query(
       `SELECT
         p.id, p.name, p.position, p.nfl_team,

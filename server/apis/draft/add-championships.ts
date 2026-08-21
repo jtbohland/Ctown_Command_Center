@@ -1,4 +1,5 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
+import { requireAdmin } from "../../lib/auth/require-admin.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
@@ -22,6 +23,8 @@ export default api({
   }),
 
   async run(ctx) {
+    requireAdmin(ctx, "add championship data");
+
     // 1. Ensure column exists
     await ctx.integrations.apps_db.execute(
       `DO $$ BEGIN

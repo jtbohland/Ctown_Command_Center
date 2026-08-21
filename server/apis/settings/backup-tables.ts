@@ -1,4 +1,5 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
+import { requireAdmin } from "../../lib/auth/require-admin.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
@@ -45,6 +46,8 @@ export default api({
   }),
 
   async run(ctx, { label }) {
+    requireAdmin(ctx, "create a database backup");
+
     const db = ctx.integrations.apps_db;
 
     // 1. Create the backup snapshots table if it doesn't exist

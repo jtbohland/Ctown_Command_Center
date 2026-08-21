@@ -1,5 +1,6 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
 import { normalizePlayerName } from "../../lib/normalize-player-name.js";
+import { requireAdmin } from "../../lib/auth/require-admin.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
@@ -32,12 +33,7 @@ export default api({
   }),
 
   async run(ctx, { playerName, position, nflTeam, byeWeek }) {
-    // Ensure the is_write_in column exists
-    await ctx.integrations.apps_db.execute(
-      "ALTER TABLE ffwr_players ADD COLUMN IF NOT EXISTS is_write_in BOOLEAN DEFAULT FALSE",
-      undefined,
-      { label: "Ensure is_write_in column" },
-    );
+    requireAdmin(ctx, "create a write-in player");
 
     const normalized = normalizePlayerName(playerName);
 

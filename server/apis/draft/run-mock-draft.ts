@@ -1,4 +1,5 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
+import { requireAdmin } from "../../lib/auth/require-admin.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
@@ -151,6 +152,8 @@ export default api({
   }),
 
   async run(ctx, { startRound, existingPicks }) {
+    requireAdmin(ctx, "run a mock draft");
+
     // Fetch all data
     const [players, draftPicks, teams] = await Promise.all([
       ctx.integrations.apps_db.query(

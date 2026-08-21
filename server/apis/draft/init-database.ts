@@ -101,6 +101,7 @@ export default api({
         ALTER TABLE ffwr_players ADD COLUMN IF NOT EXISTS sos TEXT;
         ALTER TABLE ffwr_players ADD COLUMN IF NOT EXISTS age INT;
         ALTER TABLE ffwr_players ADD COLUMN IF NOT EXISTS dynasty_tier INT;
+        ALTER TABLE ffwr_players ADD COLUMN IF NOT EXISTS is_write_in BOOLEAN DEFAULT FALSE;
         ALTER TABLE ffwr_players ADD CONSTRAINT ffwr_players_name_pos_uq UNIQUE (name, position);
       EXCEPTION WHEN duplicate_table THEN NULL;
                WHEN duplicate_column THEN NULL;
