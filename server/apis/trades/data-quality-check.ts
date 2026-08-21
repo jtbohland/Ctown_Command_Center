@@ -1,14 +1,16 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
+import {
+  KEEPERS_PER_TEAM,
+  LEAGUE_SIZE_BY_YEAR,
+} from "../../lib/valuation/valuation-spec.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
-// Spec §8: Required data-quality checks
-// League-size map for pick validation checks
-const LEAGUE_SIZE_BY_YEAR: Record<number, number> = {
-  2019: 10, 2020: 10, 2021: 10, 2022: 10, 2023: 10, 2024: 10,
-  2025: 11, 2026: 11, 2027: 11,
-};
-const KEEPERS_PER_TEAM = 4;
+// Spec §8: Required data-quality checks.
+// The league-size map and keeper count used by the pick-math checks are read
+// from the canonical valuation spec. A data-quality check that validated pick
+// math against its own private copy of the league sizes could report "pass"
+// while the engines were using different numbers.
 
 const CheckResultSchema = z.object({
   id: z.string(),

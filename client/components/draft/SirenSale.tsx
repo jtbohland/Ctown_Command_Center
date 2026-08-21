@@ -173,6 +173,7 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
         period,
         notes: notes.trim() || null,
         assets: allAssets,
+        dryRun: false,
       });
 
       toast.success(`🚨 ${res?.message ?? "Trade saved!"}`);

@@ -4,18 +4,49 @@
 
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import {
+  BASE_VALUE,
+  CURRENT_DRAFT_YEAR,
+  CURRENT_SEASON,
+  calcPlayerValue,
+  getAgeFactor,
+  getFuturePickDiscount,
+  getKeeperOffset,
+  getLeagueSize,
+  getRookiePremium,
+  getSeasonPhaseInfo,
+  getVerdict as getSpecVerdict,
+  KEEPERS_PER_TEAM,
+  NFL_WEEK1_TUESDAY,
+  pickToExpectedAdp,
+  POSITIONAL_SCARCITY,
+  POWER,
+  ROOKIE_MAX_BOOST,
+  ROOKIE_MIN_BOOST,
+} from "@/lib/valuation/valuation-spec";
 
-// ── Constants (mirrored from the valuation engine) ──────────
-const BASE = 10000;
-const POWER = 0.6;
-const KEEPER_OFFSET = 44; // 11 teams × 4 keepers
-const FUTURE_DISCOUNT = 0.10;
-const CURRENT_YEAR = 2026;
-const LEAGUE_SIZE = 11;
+// ── Constants ───────────────────────────────────────────
+// This panel explains the engine to the league, so it must never restate the
+// engine's numbers by hand. Every constant and every worked-example figure
+// below is read from the canonical valuation spec. When the spec changes,
+// this explainer changes with it.
+const LEAGUE_SIZE = getLeagueSize(CURRENT_DRAFT_YEAR);
+const KEEPER_OFFSET = getKeeperOffset(CURRENT_DRAFT_YEAR);
 
-function calcValue(adp: number): number {
-  return BASE * Math.pow(1 / adp, POWER);
+const calcValue = (adp: number) => calcPlayerValue(adp);
+
+// Actuals weights sampled straight off the canonical season curve rather than
+// typed in. The panel previously advertised "Week 10 ≈ 62%", which no engine
+// has ever produced — the real Week 10 weight is 35%.
+function weightAtWeek(week: number): number {
+  const week1 = new Date(NFL_WEEK1_TUESDAY[CURRENT_SEASON]).getTime();
+  const probe = new Date(week1 + week * 7 * 86400000).toISOString().slice(0, 10);
+  return getSeasonPhaseInfo(probe, CURRENT_SEASON).actualsWeight;
 }
+
+const WEEK1_WEIGHT = weightAtWeek(1);
+const POSTSEASON_WEIGHT = weightAtWeek(25);
+const pct = (w: number) => `${Math.round(w * 100)}%`;
 
 // ── Example assets ──────────────────────────────────────────
 interface ExampleAsset {
@@ -43,7 +74,8 @@ const PRESEASON_B: ExampleAsset[] = [
   { name: "2026 Rd 1", type: "pick", pickYear: 2026, pickRound: 1 },
 ];
 
-// ── Mid-season trade (Week 10, ~62% actuals weight) ─────────
+// ── Mid-season trade (see MIDSEASON_WEEK / MIDSEASON_WEIGHT below) ──
+// The weight is read off the canonical curve, not asserted here.
 const MIDSEASON_A: ExampleAsset[] = [
   { name: "CeeDee Lamb", type: "player", position: "WR", adp: 5, age: 27,
     actualsPercentile: 88, positionTotal: 120 },
@@ -55,7 +87,8 @@ const MIDSEASON_B: ExampleAsset[] = [
   { name: "2026 Rd 1", type: "pick", pickYear: 2026, pickRound: 1 },
 ];
 
-const MIDSEASON_WEIGHT = 0.62; // ~Week 10 weight
+const MIDSEASON_WEEK = 10;
+const MIDSEASON_WEIGHT = weightAtWeek(MIDSEASON_WEEK);
 
 // ── Compute breakdown ───────────────────────────────────────
 interface Breakdown {
@@ -75,21 +108,17 @@ function computeBreakdown(asset: ExampleAsset, useMidseason: boolean): Breakdown
 
   if (asset.type === "pick") {
     const round = asset.pickRound ?? 1;
-    const year = asset.pickYear ?? CURRENT_YEAR;
-    const startOfRound = (round - 1) * LEAGUE_SIZE + 1;
-    const endOfRound = round * LEAGUE_SIZE;
-    const midPick = (startOfRound + endOfRound) / 2;
-    const adpUsed = midPick + KEEPER_OFFSET;
+    const year = asset.pickYear ?? CURRENT_DRAFT_YEAR;
+    const adpUsed = pickToExpectedAdp(round, year);
     const baseValue = calcValue(adpUsed);
 
-    const yearsOut = Math.max(0, year - CURRENT_YEAR);
-    let discount = 1.0;
-    if (yearsOut > 0) {
-      discount = Math.pow(1 - FUTURE_DISCOUNT, yearsOut);
+    const yearsOut = Math.max(0, year - CURRENT_DRAFT_YEAR);
+    const discount = getFuturePickDiscount(year, CURRENT_DRAFT_YEAR);
+    if (discount !== 1.0) {
       factors.push({
         label: `Future Pick (${year})`,
         multiplier: discount,
-        explanation: `${yearsOut}yr out → (1 − 10%)^${yearsOut} = ${(discount * 100).toFixed(0)}% of face value`,
+        explanation: `${yearsOut}yr out → ${pct(discount)} of face value`,
       });
     }
 
@@ -104,9 +133,8 @@ function computeBreakdown(asset: ExampleAsset, useMidseason: boolean): Breakdown
   // Rookie hype
   if (asset.rookiePick) {
     const pick = asset.rookiePick;
-    const t = (pick - 1) / (128 - 1);
-    const boost = 0.01 + (0.20 - 0.01) * Math.pow(1 - t, 2);
-    const premium = 1 + boost;
+    const premium = getRookiePremium(pick);
+    const boost = premium - 1;
     multiplier *= premium;
     factors.push({
       label: `🌟 Rookie #${pick}`,
@@ -117,12 +145,7 @@ function computeBreakdown(asset: ExampleAsset, useMidseason: boolean): Breakdown
 
   // Age curve
   if (asset.age) {
-    let ageFactor = 1.0;
-    if (asset.age <= 24) ageFactor = 1.06;
-    else if (asset.age <= 27) ageFactor = 1.03;
-    else if (asset.age <= 29) ageFactor = 1.0;
-    else if (asset.age <= 31) ageFactor = 0.95;
-    else ageFactor = 0.90;
+    const ageFactor = getAgeFactor(asset.age);
     if (ageFactor !== 1.0) {
       multiplier *= ageFactor;
       const pct = Math.round((ageFactor - 1) * 100);
@@ -151,12 +174,18 @@ function computeBreakdown(asset: ExampleAsset, useMidseason: boolean): Breakdown
 }
 
 // ── Verdict helper ──────────────────────────────────────────
+// Labels and thresholds come from the spec; only the presentation colors are
+// local to this component.
+const VERDICT_STYLES: Record<string, { color: string; bg: string }> = {
+  fair: { color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/30" },
+  slight: { color: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/30" },
+  clear: { color: "text-orange-400", bg: "bg-orange-500/10 border-orange-500/30" },
+  robbery: { color: "text-red-400", bg: "bg-red-500/10 border-red-500/30" },
+};
+
 function getVerdict(pctDiff: number) {
-  const abs = Math.abs(pctDiff);
-  if (abs <= 5) return { label: "Fair Catch", emoji: "🧤", color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/30" };
-  if (abs <= 15) return { label: "Edge Rush", emoji: "📈", color: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/30" };
-  if (abs <= 25) return { label: "Pick Six", emoji: "🏆", color: "text-orange-400", bg: "bg-orange-500/10 border-orange-500/30" };
-  return { label: "Flag on the Play", emoji: "🚩", color: "text-red-400", bg: "bg-red-500/10 border-red-500/30" };
+  const v = getSpecVerdict(pctDiff);
+  return { label: v.label, emoji: v.emoji, ...VERDICT_STYLES[v.severity] };
 }
 
 // ── Main component ──────────────────────────────────────────
@@ -190,8 +219,9 @@ export default function FormulaDeepDive() {
         <p className="text-xs text-muted-foreground leading-relaxed">
           Every player and pick gets a <span className="text-foreground font-semibold">point value</span> based
           on their ADP rank. Before the season starts, that's the whole story. Once games begin, real performance
-          data blends in — starting small in Week 1 and growing to ~85% weight by the end of the season.
-          The formula automatically knows where we are in the season and adjusts the mix.
+          data blends in — {pct(WEEK1_WEIGHT)} in Week 1, rising through the regular season and reaching{" "}
+          {pct(POSTSEASON_WEIGHT)} once the regular season is complete.
+          The formula automatically knows where we are in the season and adjusts the mix — there is no toggle.
         </p>
       </div>
 
@@ -204,44 +234,50 @@ export default function FormulaDeepDive() {
           <VarRow
             emoji="📊"
             name="Base Value"
-            formula="10,000 × (1 / ADP) ^ 0.6"
+            formula={`${BASE_VALUE.toLocaleString()} × (1 / ADP) ^ ${POWER}`}
             desc="The starting point. Lower ADP = higher value. The power curve means the gap between ADP 1 and ADP 10 is huge, but ADP 100 vs 110 is tiny."
           />
           <VarRow
             emoji="🔒"
             name="Keeper Offset"
-            formula="11 teams × 4 keepers = 44"
-            desc="Top 44 players are kept and never hit the draft. Pick 1.01 actually targets the 45th-best player, not the #1."
+            formula={`${LEAGUE_SIZE} teams × ${KEEPERS_PER_TEAM} keepers = ${KEEPER_OFFSET}`}
+            desc={`Top ${KEEPER_OFFSET} players are kept and never hit the draft. Pick 1.01 actually targets the ${KEEPER_OFFSET + 1}th-best player, not the #1.`}
           />
           <VarRow
             emoji="📉"
             name="Future Pick Discount"
-            formula="−10% per year out"
-            desc="A 2027 pick is worth 90% of the same pick this year. A 2028 pick? ~81%. Uncertainty costs value."
+            formula={`1yr out: ${pct(getFuturePickDiscount(CURRENT_DRAFT_YEAR + 1))} · 2yr: ${pct(getFuturePickDiscount(CURRENT_DRAFT_YEAR + 2))} · 3yr+: ${pct(getFuturePickDiscount(CURRENT_DRAFT_YEAR + 3))}`}
+            desc={`A ${CURRENT_DRAFT_YEAR + 1} pick is worth ${pct(getFuturePickDiscount(CURRENT_DRAFT_YEAR + 1))} of the same pick this year. A ${CURRENT_DRAFT_YEAR + 2} pick? ${pct(getFuturePickDiscount(CURRENT_DRAFT_YEAR + 2))}. Uncertainty costs value.`}
           />
           <VarRow
             emoji="🌟"
             name="Rookie Hype"
-            formula="+1% to +20%"
+            formula={`+${Math.round(ROOKIE_MIN_BOOST * 100)}% to +${Math.round(ROOKIE_MAX_BOOST * 100)}%`}
             desc="Current NFL Draft class gets a dynasty premium. #1 overall gets the max boost, declining by pick. Reflects that rookie ceiling hype."
           />
           <VarRow
             emoji="🎂"
             name="Age Curve"
-            formula="≤24: +6% · 25-27: +3% · 30-31: −5% · 32+: −10%"
+            formula={[24, 27, 31, 32]
+              .map((age) => {
+                const delta = Math.round((getAgeFactor(age) - 1) * 100);
+                const band = age === 24 ? "≤24" : age === 27 ? "25-27" : age === 31 ? "30-31" : "32+";
+                return `${band}: ${delta >= 0 ? "+" : "−"}${Math.abs(delta)}%`;
+              })
+              .join(" · ")}
             desc="Young players in their prime window get a bump. Aging vets take a haircut. Dynasty is about buying future production."
           />
           <VarRow
             emoji="⚡"
             name="Positional Scarcity"
-            formula="Top-5 QB: +8%"
+            formula={`Top-5 QB: +${Math.round((POSITIONAL_SCARCITY - 1) * 100)}%`}
             desc="Elite QBs are rare in dynasty — the top 5 get a scarcity boost. TE premium is optional (off by default)."
           />
           <VarRow
             emoji="🔄"
             name="Actuals Blend"
             formula="baseline × (1 − weight) + actuals × weight"
-            desc="During the season, real performance data blends in. Week 1 ≈ 5% actuals, Week 10 ≈ 62%, Postseason ≈ 85%. Preseason is pure ADP."
+            desc={`During the season, real performance data blends in. Week 1 ≈ ${pct(WEEK1_WEIGHT)} actuals, Week ${MIDSEASON_WEEK} ≈ ${pct(MIDSEASON_WEIGHT)}, Postseason ≈ ${pct(POSTSEASON_WEIGHT)}. Preseason is pure ADP.`}
           />
         </div>
       </div>
@@ -289,7 +325,7 @@ export default function FormulaDeepDive() {
         }`}>
           {isMidseason ? (
             <>
-              <span className="font-semibold">📅 Week 10 trade</span> — Actuals weight: {Math.round(MIDSEASON_WEIGHT * 100)}%.
+              <span className="font-semibold">📅 Week {MIDSEASON_WEEK} trade</span> — Actuals weight: {pct(MIDSEASON_WEIGHT)}.
               Player values are a blend of their ADP baseline and how they've actually performed this season.
             </>
           ) : (
@@ -491,7 +527,7 @@ function AssetCard({ breakdown, showMath, color, isMidseason }: {
         <div className="border-t border-border/30 px-2.5 py-2 space-y-1.5 bg-background/30">
           <MathStep
             label={isPlayer ? `ADP ${adpUsed}` : `Pick → ADP ${Math.round(adpUsed)}`}
-            formula={`10,000 × (1/${Math.round(adpUsed)})^0.6`}
+            formula={`${BASE_VALUE.toLocaleString()} × (1/${Math.round(adpUsed)})^${POWER}`}
             result={Math.round(baseValue).toLocaleString()}
             annotation={
               isPlayer
@@ -529,7 +565,7 @@ function AssetCard({ breakdown, showMath, color, isMidseason }: {
                   label="🔄 Blended"
                   formula={`${Math.round(finalValue)} × ${((1 - blendWeight) * 100).toFixed(0)}% + ${Math.round(actualsScaled)} × ${(blendWeight * 100).toFixed(0)}%`}
                   result={Math.round(blendedValue).toLocaleString()}
-                  annotation={`Week 10 blend: ${(blendWeight * 100).toFixed(0)}% real performance, ${((1 - blendWeight) * 100).toFixed(0)}% ADP baseline`}
+                  annotation={`Week ${MIDSEASON_WEEK} blend: ${(blendWeight * 100).toFixed(0)}% real performance, ${((1 - blendWeight) * 100).toFixed(0)}% ADP baseline`}
                   isModifier
                 />
               </div>

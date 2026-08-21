@@ -1,84 +1,38 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
 import { normalizeName, extractKeeperRightsPlayer } from "../../lib/normalize-trade-name.js";
+import {
+  BASE_VALUE,
+  DEFAULT_FUTURE_DISCOUNT,
+  FAIR_TOLERANCE,
+  FUTURE_PICK_DISCOUNT,
+  KEEPERS_PER_TEAM,
+  POWER,
+  VALUATION_SPEC_FINGERPRINT,
+  VALUATION_SPEC_VERSION,
+  calcPlayerValue,
+  getFuturePickDiscount,
+  getLeagueSize,
+  getUnrankedBaseline,
+  getVerdict as getSpecVerdict,
+  pickToExpectedAdp,
+  seasonToDraftYear,
+} from "../../lib/valuation/valuation-spec.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
-// ─── Canonical Constants (must match backfill + evaluate-trade + client trade-utils) ──
-const BASE_VALUE = 10000;
-const POWER = 0.6;
-const KEEPERS_PER_TEAM = 4;
-const FAIR_TOLERANCE = 5;
+// ─── Canonical constants ──────────────────────────────────────
+// Phase 3: this audit no longer keeps private copies of the valuation
+// constants. It reads them from the canonical spec, which is also what
+// EvaluateTrade and the backfill engine consume, and then audits that spec
+// against an independent ratified baseline (see CANONICAL_BASELINE below).
 const VERDICT_SCALE = 1.0;
 
-const LEAGUE_SIZE_BY_YEAR: Record<number, number> = {
-  2019: 10, 2020: 10, 2021: 10, 2022: 10, 2023: 10, 2024: 10,
-  2025: 11, 2026: 11, 2027: 11, 2028: 11,
-};
-const DEFAULT_LEAGUE_SIZE = 11;
-
-const FUTURE_PICK_DISCOUNT: Record<number, number> = {
-  0: 1.00,
-  1: 0.80,
-  2: 0.65,
-};
-const DEFAULT_FUTURE_DISCOUNT = 0.50;
-
-// ─── Shared utility functions (canonical copies) ──────────────
-
-function getLeagueSize(year: number): number {
-  return LEAGUE_SIZE_BY_YEAR[year] ?? DEFAULT_LEAGUE_SIZE;
-}
-
-function getKeeperOffset(year: number): number {
-  return getLeagueSize(year) * KEEPERS_PER_TEAM;
-}
-
-function pickToExpectedAdp(round: number, year: number, overallPick?: number): number {
-  const leagueSize = getLeagueSize(year);
-  const draftPosition = overallPick
-    ? overallPick
-    : ((round - 1) * leagueSize + 1 + round * leagueSize) / 2;
-  return draftPosition + getKeeperOffset(year);
-}
-
 function calcValue(adpRank: number): number {
-  if (adpRank <= 0) return 0;
-  return BASE_VALUE * Math.pow(1 / adpRank, POWER);
-}
-
-function getFuturePickDiscount(pickYear: number, referenceDraftYear: number): number {
-  const yearsAhead = Math.max(0, pickYear - referenceDraftYear);
-  return FUTURE_PICK_DISCOUNT[yearsAhead] ?? DEFAULT_FUTURE_DISCOUNT;
+  return calcPlayerValue(adpRank, POWER);
 }
 
 function getVerdict(pctDiff: number): { label: string; emoji: string; severity: string } {
-  const absDiff = Math.abs(pctDiff);
-  const t1 = FAIR_TOLERANCE;
-  const t2 = FAIR_TOLERANCE + 10 * VERDICT_SCALE;
-  const t3 = FAIR_TOLERANCE + 20 * VERDICT_SCALE;
-  if (absDiff <= t1) return { label: "Fair Catch", emoji: "🧤", severity: "fair" };
-  if (absDiff <= t2) return { label: "Edge Rush", emoji: "📈", severity: "slight" };
-  if (absDiff <= t3) return { label: "Pick Six", emoji: "🏆", severity: "clear" };
-  return { label: "Flag on the Play", emoji: "🚩", severity: "robbery" };
-}
-
-function seasonToDraftYear(season: string): number {
-  const parts = season.split("-");
-  if (parts.length === 2 && parts[1].length === 2) {
-    const prefix = parts[0].substring(0, 2);
-    return parseInt(prefix + parts[1], 10);
-  }
-  return parseInt(parts[0], 10) || 2024;
-}
-
-const UNRANKED_BASELINE: Record<string, number> = {
-  QB: 175, RB: 225, WR: 250, TE: 200, K: 300, DEF: 300,
-};
-const DEFAULT_UNRANKED_BASELINE = 275;
-
-function getUnrankedBaseline(position: string | null): number {
-  if (!position) return DEFAULT_UNRANKED_BASELINE;
-  return UNRANKED_BASELINE[position.toUpperCase()] ?? DEFAULT_UNRANKED_BASELINE;
+  return getSpecVerdict(pctDiff, FAIR_TOLERANCE, VERDICT_SCALE);
 }
 
 // ─── Schemas ──────────────────────────────────────────────────
@@ -242,6 +196,11 @@ export default api({
         futurePickDiscounts: z.boolean(),
       }),
       engineDifferences: z.array(z.string()),
+      /** Canonical spec identity that produced this audit run. */
+      valuationSpec: z.object({
+        version: z.string(),
+        fingerprint: z.string(),
+      }),
     }),
 
     // v2 snapshot consistency
@@ -357,20 +316,62 @@ export default api({
       snapshotByTrade.set(s.trade_id, s);
     }
 
-    // ── Audit constants alignment with EvaluateTrade ──
-    // EvaluateTrade uses these same constants (verified by code review):
-    // BASE_VALUE = 10000, DEFAULT_POWER = 0.6, KEEPERS_PER_TEAM = 4
-    // Same LEAGUE_SIZE_BY_YEAR map, same pickToExpectedAdp (corrected), same getVerdict thresholds
-    // Difference: EvaluateTrade accepts modifier overrides (valueCurve, fairTolerance, etc.)
-    // but defaults match the canonical values when modifiers are null/undefined.
+    // ── Audit constants alignment ──
+    // Phase 3: every engine (Exchange, backfill, provenance, client) now reads
+    // its constants from server/lib/valuation/valuation-spec.ts, so "do the
+    // engines agree with each other" is no longer a meaningful question — they
+    // are literally the same values.
+    //
+    // What IS still worth auditing is whether that shared spec still matches
+    // the league's RATIFIED baseline. CANONICAL_BASELINE below is written as
+    // independent literals on purpose: it is the expectation, not a re-export.
+    // If someone edits the spec, these checks flip to false instead of the
+    // audit silently reporting `true` as it did before.
+    const CANONICAL_BASELINE = {
+      baseValue: 10000,
+      power: 0.6,
+      keepersPerTeam: 4,
+      fairTolerance: 5,
+      leagueSizes: {
+        2019: 10, 2020: 10, 2021: 10, 2022: 10, 2023: 10, 2024: 10,
+        2025: 11, 2026: 11, 2027: 11, 2028: 11,
+      } as Record<number, number>,
+      // years ahead of the reference draft year → discount factor
+      futurePickDiscounts: { 0: 1.0, 1: 0.8, 2: 0.65, 3: 0.5, 4: 0.5 } as Record<number, number>,
+      // |pctDiff| → expected severity at scale 1.0
+      verdictThresholds: [
+        { pct: 0, severity: "fair" },
+        { pct: 5, severity: "fair" },
+        { pct: 9, severity: "slight" },
+        { pct: 15, severity: "slight" },
+        { pct: 20, severity: "clear" },
+        { pct: 25, severity: "clear" },
+        { pct: 40, severity: "robbery" },
+      ],
+    };
+
     const constantsMatch = {
-      baseValue: true,        // 10000 in both
-      power: true,            // 0.6 in both (DEFAULT_POWER in EvaluateTrade)
-      keepersPerTeam: true,   // 4 in both
-      leagueSizes: true,      // Same LEAGUE_SIZE_BY_YEAR map
-      fairTolerance: true,    // 5 in both
-      verdictThresholds: true, // Same getVerdict with scale=1.0
-      futurePickDiscounts: true, // Same discount map (backfill uses same values)
+      baseValue: BASE_VALUE === CANONICAL_BASELINE.baseValue,
+      power: POWER === CANONICAL_BASELINE.power,
+      keepersPerTeam: KEEPERS_PER_TEAM === CANONICAL_BASELINE.keepersPerTeam,
+      // getLeagueSize() — not the raw map — is what every engine actually
+      // calls, and it applies DEFAULT_LEAGUE_SIZE for years the map does not
+      // enumerate (e.g. 2028). Auditing the raw map would report a false
+      // mismatch for those years.
+      leagueSizes: Object.entries(CANONICAL_BASELINE.leagueSizes).every(
+        ([year, size]) => getLeagueSize(Number(year)) === size,
+      ),
+      fairTolerance: FAIR_TOLERANCE === CANONICAL_BASELINE.fairTolerance,
+      verdictThresholds: CANONICAL_BASELINE.verdictThresholds.every(
+        ({ pct, severity }) => getVerdict(pct).severity === severity,
+      ),
+      // Previously hardcoded `true` while the Exchange actually applied a
+      // geometric (1 - 0.10)^yearsOut curve — a 2028 pick was priced ~25% high.
+      // Now computed against the ratified step table.
+      futurePickDiscounts: Object.entries(CANONICAL_BASELINE.futurePickDiscounts).every(
+        ([yearsAhead, expected]) =>
+          Math.abs(getFuturePickDiscount(2026 + Number(yearsAhead), 2026) - expected) < 1e-9,
+      ),
     };
 
     // Known structural differences between Exchange and Backfill
@@ -379,8 +380,12 @@ export default api({
       "Exchange accepts user-tunable modifier overrides — Backfill uses fixed canonical constants",
       "Backfill uses actuals blending (in-season weight 10-85%) — Exchange does not (prospective trades only)",
       "Backfill applies position-specific unranked baselines for missing ADP — Exchange leaves unresolved",
-      "Backfill uses future-pick discounts from a fixed table — Exchange uses a per-year-discount modifier",
       "Backfill resolves keeper-rights assets at RIGHTS_VALUE_MULTIPLIER=1.0 — Exchange does not handle keeper rights",
+      `Both engines now share the canonical future-pick step table (${
+        Object.entries(FUTURE_PICK_DISCOUNT)
+          .map(([y, d]) => `+${y}y ${d}`)
+          .join(", ")
+      }, 3y+ ${DEFAULT_FUTURE_DISCOUNT}); the Exchange's futurePickDiscount modifier is an intensity dial on that table, not a competing curve`,
     ];
 
     // ── Process each trade ──
@@ -630,6 +635,10 @@ export default api({
         misalignedPicks,
         constantsMatch,
         engineDifferences,
+        valuationSpec: {
+          version: VALUATION_SPEC_VERSION,
+          fingerprint: VALUATION_SPEC_FINGERPRINT,
+        },
       },
 
       snapshotConsistency: {

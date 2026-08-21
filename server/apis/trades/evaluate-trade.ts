@@ -1,190 +1,55 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
 import { normalizeName, extractKeeperRightsPlayer } from "../../lib/normalize-trade-name.js";
+import {
+  CURRENT_DRAFT_YEAR,
+  CURRENT_SEASON,
+  POWER as DEFAULT_POWER,
+  ROOKIE_MAX_PICK,
+  VALUATION_SPEC_FINGERPRINT,
+  VALUATION_SPEC_VERSION,
+  calcPlayerValue,
+  computeActualsValue,
+  getAgeFactor,
+  getFuturePickDiscount,
+  getRookiePremium,
+  getSeasonPhaseInfo,
+  getVerdict,
+  pickToExpectedAdp,
+} from "../../lib/valuation/valuation-spec.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
-// ─── Value Engine Constants (defaults — overridable via modifiers input) ───
-const BASE_VALUE = 10000;
-const DEFAULT_POWER = 0.6;
-const KEEPERS_PER_TEAM = 4;
-
-// C-Town league size by draft year: 10 teams 2019-2024, 11 teams 2025+
-const LEAGUE_SIZE_BY_YEAR: Record<number, number> = {
-  2019: 10, 2020: 10, 2021: 10, 2022: 10, 2023: 10, 2024: 10,
-  2025: 11, 2026: 11, 2027: 11,
-};
-const DEFAULT_LEAGUE_SIZE = 11;
-
-function getLeagueSize(year: number): number {
-  return LEAGUE_SIZE_BY_YEAR[year] ?? DEFAULT_LEAGUE_SIZE;
-}
-
-function getKeeperOffset(year: number): number {
-  return getLeagueSize(year) * KEEPERS_PER_TEAM;
-}
-
-// ─── Dynasty Multiplier Constants ───────────────────────────
-const ROOKIE_MAX_PICK = 128;
-const ROOKIE_MIN_BOOST = 0.01;
-
-function getRookiePremium(overallPick: number, maxBoost: number): number {
-  if (overallPick < 1 || overallPick > ROOKIE_MAX_PICK) return 1.0;
-  const t = (overallPick - 1) / (ROOKIE_MAX_PICK - 1);
-  const boost = ROOKIE_MIN_BOOST + (maxBoost - ROOKIE_MIN_BOOST) * Math.pow(1 - t, 2);
-  return 1 + boost;
-}
-
-function getRawAgeFactor(age: number): number {
-  if (age <= 24) return 1.06;
-  if (age <= 27) return 1.03;
-  if (age <= 29) return 1.00;
-  if (age <= 31) return 0.95;
-  return 0.90;
-}
-
-function getAgeFactor(age: number, ageCurve: number): number {
-  if (ageCurve === 0) return 1.0;
-  const raw = getRawAgeFactor(age);
-  return 1.0 + (raw - 1.0) * ageCurve;
-}
-
-// Future pick discount
-const CURRENT_YEAR_FOR_DISCOUNT = 2026;
-function getYearDiscount(year: number, perYearDiscount: number): number {
-  const yearsOut = Math.max(0, year - CURRENT_YEAR_FOR_DISCOUNT);
-  if (yearsOut === 0) return 1.0;
-  return Math.pow(1 - perYearDiscount, yearsOut);
-}
-
-function pickToExpectedAdp(round: number, year: number, overallPick?: number): number {
-  const leagueSize = getLeagueSize(year);
-  const draftPosition = overallPick
-    ? overallPick
-    : ((round - 1) * leagueSize + 1 + round * leagueSize) / 2;
-  return draftPosition + getKeeperOffset(year);
-}
-
-function calcValue(adpRank: number, power: number): number {
-  if (adpRank <= 0) return 0;
-  return BASE_VALUE * Math.pow(1 / adpRank, power);
-}
-
-function getVerdict(
-  pctDiff: number,
-  fairTolerance: number,
-  verdictScale: number,
-): { label: string; emoji: string; severity: string } {
-  const absDiff = Math.abs(pctDiff);
-  const t1 = fairTolerance;
-  const t2 = fairTolerance + 10 * verdictScale;
-  const t3 = fairTolerance + 20 * verdictScale;
-  if (absDiff <= t1) return { label: "Fair Catch", emoji: "🧤", severity: "fair" };
-  if (absDiff <= t2) return { label: "Edge Rush", emoji: "📈", severity: "slight" };
-  if (absDiff <= t3) return { label: "Pick Six", emoji: "🏆", severity: "clear" };
-  return { label: "Flag on the Play", emoji: "🚩", severity: "robbery" };
-}
-
-// ─── NFL Season Calendar (for live Actuals blending) ────────
-// Week 1 Tuesday = the Tuesday of the first game week.
-// All dates are the Tuesday that starts the "week 1 scoring window".
-const NFL_WEEK1_TUESDAY: Record<string, string> = {
-  "2018-19": "2018-09-04",
-  "2019-20": "2019-09-03",
-  "2020-21": "2020-09-08",
-  "2021-22": "2021-09-07",
-  "2022-23": "2022-09-06",
-  "2023-24": "2023-09-05",
-  "2024-25": "2024-09-03",
-  "2025-26": "2025-09-02",
-  "2026-27": "2026-09-08", // 2026 NFL season starts Wed Sep 9; Tuesday = Sep 8
-};
-
-const REGULAR_SEASON_WEEKS: Record<string, number> = {
-  "2018-19": 17,
-  "2019-20": 17,
-  "2020-21": 17,
-  "2021-22": 18,
-  "2022-23": 18,
-  "2023-24": 18,
-  "2024-25": 18,
-  "2025-26": 18,
-  "2026-27": 18,
-};
-
-// The current season for the live Exchange
-const CURRENT_SEASON = "2026-27";
-
-type SeasonPhase = "preseason" | "early" | "mid" | "late" | "postseason";
-
-interface PhaseInfo {
-  lastCompletedWeek: number;
-  seasonPhase: SeasonPhase;
-  actualsWeight: number;
-  totalWeeks: number;
-}
+// ─── Valuation constants ────────────────────────────────────
+// All core constants, curves and the NFL season calendar now come from the
+// canonical spec (server/lib/valuation/valuation-spec.ts) so the Exchange and
+// the historical trade ledger cannot drift apart.
+//
+// Phase 3 / Decision A: this API previously discounted future picks
+// geometrically — (1 - 0.10) ^ yearsOut, i.e. 0.90 / 0.81 / 0.73 — while every
+// historical engine used the canonical step table 0.80 / 0.65 / 0.50. The same
+// 2028 pick was therefore worth 25% more on the Exchange than in the ledger.
+// The Exchange now uses the canonical step table.
 
 /**
- * Determine the current NFL season phase and actuals weight based on a valuation date.
- * Weight scale (compounding — the more weeks, the more data, the more we trust actuals):
- *   Preseason:      0%
- *   Early (wk 1-4): 10% → 20%  (ramps ~3.3% per week)
- *   Mid (wk 5-10):  25% → 35%  (ramps ~2% per week)
- *   Late (wk 11-18):40% → 50%  (ramps ~1.4% per week)
- *   Postseason:     85%
+ * Apply the user's `futurePickDiscount` modifier as an INTENSITY DIAL on the
+ * canonical step discount rather than as a competing formula.
+ *
+ * At the league-default 0.10 the factor is exactly 1.0, so the canonical table
+ * is reproduced unchanged. Turning the dial up deepens every step
+ * proportionally; turning it to 0 removes future-pick discounting entirely.
  */
-function getSeasonPhaseInfo(valuationDate: string, season: string): PhaseInfo {
-  const week1Tuesday = NFL_WEEK1_TUESDAY[season];
-  const totalWeeks = REGULAR_SEASON_WEEKS[season] ?? 18;
+const DEFAULT_FUTURE_PICK_MODIFIER = 0.1;
 
-  if (!week1Tuesday) {
-    return { lastCompletedWeek: 0, seasonPhase: "preseason", actualsWeight: 0, totalWeeks };
-  }
+function getYearDiscount(year: number, perYearDiscount: number): number {
+  const canonical = getFuturePickDiscount(year, CURRENT_DRAFT_YEAR);
+  const intensity = perYearDiscount / DEFAULT_FUTURE_PICK_MODIFIER;
+  if (intensity === 1) return canonical;
+  return Math.max(0, 1 - (1 - canonical) * intensity);
+}
 
-  const valDateMs = new Date(valuationDate).getTime();
-  const week1Ms = new Date(week1Tuesday).getTime();
-  const msPerWeek = 7 * 24 * 60 * 60 * 1000;
-
-  if (valDateMs < week1Ms) {
-    return { lastCompletedWeek: 0, seasonPhase: "preseason", actualsWeight: 0, totalWeeks };
-  }
-
-  const weeksElapsed = Math.floor((valDateMs - week1Ms) / msPerWeek);
-  const lastCompletedWeek = Math.min(weeksElapsed, totalWeeks);
-
-  let seasonPhase: SeasonPhase;
-  let actualsWeight: number;
-
-  if (lastCompletedWeek === 0) {
-    seasonPhase = "preseason";
-    actualsWeight = 0;
-  } else if (lastCompletedWeek <= 4) {
-    // Early: 10% at week 1, ramps to 20% at week 4
-    seasonPhase = "early";
-    actualsWeight = 0.10 + (lastCompletedWeek - 1) * (0.10 / 3);
-  } else if (lastCompletedWeek <= 10) {
-    // Mid: 25% at week 5, ramps to 35% at week 10
-    seasonPhase = "mid";
-    actualsWeight = 0.25 + (lastCompletedWeek - 5) * (0.10 / 5);
-  } else if (lastCompletedWeek <= totalWeeks) {
-    // Late: 40% at week 11, ramps to 50% at final week
-    seasonPhase = "late";
-    const lateWeeks = totalWeeks - 11 + 1;
-    actualsWeight = 0.40 + (lastCompletedWeek - 11) * (0.10 / (lateWeeks - 1));
-    actualsWeight = Math.min(actualsWeight, 0.50);
-  } else {
-    seasonPhase = "postseason";
-    actualsWeight = 0.85;
-  }
-
-  // Override: if all regular season weeks are complete → postseason
-  if (lastCompletedWeek >= totalWeeks) {
-    seasonPhase = "postseason";
-    actualsWeight = 0.85;
-  }
-
-  actualsWeight = Math.round(actualsWeight * 1000) / 1000;
-
-  return { lastCompletedWeek, seasonPhase, actualsWeight, totalWeeks };
+/** Thin alias so existing call sites keep reading naturally. */
+function calcValue(adpRank: number, power: number): number {
+  return calcPlayerValue(adpRank, power);
 }
 
 // ─── Weekly Actuals Computation (ported from backfill) ──────
@@ -310,11 +175,7 @@ function computePositionalPercentiles(
         ? Math.round(((ppgTotal - ppgRank + 1) / ppgTotal) * 100 * 10) / 10
         : 0;
 
-      const actualsValue = Math.round(
-        (0.60 * totalPtsPercentile + 0.40 * ppgPercentile) * 10,
-      ) / 10;
-
-      result.set(p.normalizedName, actualsValue);
+      result.set(p.normalizedName, computeActualsValue(totalPtsPercentile, ppgPercentile));
     }
   }
 
@@ -458,6 +319,15 @@ export default api({
     verdictStatus: z.enum(["definitive", "incomplete"]),
     actualsContext: ActualsContextSchema,
     dejaVu: z.array(DejaVuSchema),
+    /**
+     * Identifies the canonical valuation spec that produced this result. The
+     * client compares this against its own mirrored copy so a drifted deploy
+     * is visible in-app instead of silently mispricing trades.
+     */
+    valuationSpec: z.object({
+      version: z.string(),
+      fingerprint: z.string(),
+    }),
   }),
 
   async run(ctx, { teamAId, teamBId, teamAGives, teamBGives, modifiers }) {
@@ -572,8 +442,6 @@ export default api({
     } catch {
       ctx.log.warn("ffwr_rookie_classes not found — dynasty factors skipped");
     }
-
-    const CURRENT_DRAFT_YEAR = 2026;
 
     // ── Dynasty multiplier helper ──
     function applyDynasty(
@@ -942,6 +810,10 @@ export default api({
       verdictStatus,
       actualsContext,
       dejaVu,
+      valuationSpec: {
+        version: VALUATION_SPEC_VERSION,
+        fingerprint: VALUATION_SPEC_FINGERPRINT,
+      },
     };
   },
 });

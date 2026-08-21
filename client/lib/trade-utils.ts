@@ -29,110 +29,51 @@ function getSeasonMaxRank(detail?: Map<string, AdpEntry>): number | undefined {
 export type { AdpEvidence, AdpEntry, SeasonCoverage } from "./evidence-model";
 export { buildSeasonAdpDetailMap, buildSeasonCoverageMap } from "./evidence-model";
 
-const BASE_VALUE = 10000;
-const POWER = 0.6;
-const KEEPERS_PER_TEAM = 4;
+// ─── Canonical valuation spec ────────────────────────────────
+// Every constant and curve below comes from the single source of truth at
+// client/lib/valuation/valuation-spec.ts (mirrored byte-for-byte from
+// server/lib/valuation/valuation-spec.ts). Nothing in this file may redefine
+// a value the spec already owns — that duplication is exactly what let the
+// Exchange and the trade ledger drift apart before Phase 3.
+import {
+  calcPickValue,
+  calcPlayerValue,
+  CURRENT_DRAFT_YEAR,
+  getAgeFactor,
+  getKeeperOffset,
+  getLeagueSize,
+  getRookiePremium,
+  getVerdict,
+  NFL_WEEK1_TUESDAY,
+  POSITIONAL_SCARCITY,
+  ROOKIE_MAX_PICK,
+  seasonToDraftYear,
+  VALUATION_SPEC_FINGERPRINT,
+  VALUATION_SPEC_VERSION,
+  type Verdict,
+  type VerdictSeverity,
+} from "./valuation/valuation-spec";
 
-// C-Town league size by draft year: 10 teams 2019-2024, 11 teams 2025+
-const LEAGUE_SIZE_BY_YEAR: Record<number, number> = {
-  2019: 10, 2020: 10, 2021: 10, 2022: 10, 2023: 10, 2024: 10,
-  2025: 11, 2026: 11, 2027: 11,
+// Re-exported so existing consumers keep importing these from trade-utils.
+export {
+  calcPickValue,
+  calcPlayerValue,
+  CURRENT_DRAFT_YEAR,
+  getLeagueSize,
+  getVerdict,
+  seasonToDraftYear,
+  VALUATION_SPEC_FINGERPRINT,
+  VALUATION_SPEC_VERSION,
 };
-const DEFAULT_LEAGUE_SIZE = 11;
-
-export function getLeagueSize(year: number): number {
-  return LEAGUE_SIZE_BY_YEAR[year] ?? DEFAULT_LEAGUE_SIZE;
-}
-
-function getKeeperOffset(year: number): number {
-  return getLeagueSize(year) * KEEPERS_PER_TEAM;
-}
+export type { Verdict, VerdictSeverity };
 
 // normalizeName + extractKeeperRightsPlayer imported from shared module
 import { normalizeName, extractKeeperRightsPlayer, getCanonicalDisplayName } from "./normalize-trade-name";
 export { normalizeName, extractKeeperRightsPlayer, getCanonicalDisplayName };
 
-// ─── Future Pick Discount (relative years ahead) ────────────
-const FUTURE_PICK_DISCOUNT: Record<number, number> = {
-  0: 1.00,  // same draft year
-  1: 0.80,  // one year ahead
-  2: 0.65,  // two years ahead
-};
-const DEFAULT_FUTURE_DISCOUNT = 0.50;
-
-export const CURRENT_DRAFT_YEAR = 2026;
-
-/** Convert season string like "2024-25" to the draft year (2025). */
-export function seasonToDraftYear(season: string): number {
-  const parts = season.split("-");
-  if (parts.length === 2 && parts[1].length === 2) {
-    const prefix = parts[0].substring(0, 2);
-    return parseInt(prefix + parts[1], 10);
-  }
-  return parseInt(parts[0], 10) || CURRENT_DRAFT_YEAR;
-}
-
-function getFuturePickDiscount(pickYear: number, referenceDraftYear: number): number {
-  const yearsAhead = Math.max(0, pickYear - referenceDraftYear);
-  return FUTURE_PICK_DISCOUNT[yearsAhead] ?? DEFAULT_FUTURE_DISCOUNT;
-}
-
-// ─── Dynasty Multiplier Constants ────────────────────────────
-const ROOKIE_MAX_PICK = 128;
-const ROOKIE_MAX_BOOST = 0.20;
-const ROOKIE_MIN_BOOST = 0.01;
-function getRookiePremium(overallPick: number): number {
-  if (overallPick < 1 || overallPick > ROOKIE_MAX_PICK) return 1.0;
-  const t = (overallPick - 1) / (ROOKIE_MAX_PICK - 1);
-  const boost = ROOKIE_MIN_BOOST + (ROOKIE_MAX_BOOST - ROOKIE_MIN_BOOST) * Math.pow(1 - t, 2);
-  return 1 + boost;
-}
-const POSITIONAL_SCARCITY = 1.08;
-function getAgeFactor(age: number): number {
-  if (age <= 24) return 1.06;
-  if (age <= 27) return 1.03;
-  if (age <= 29) return 1.00;
-  if (age <= 31) return 0.95;
-  return 0.90;
-}
-
-export function calcPlayerValue(adpRank: number): number {
-  if (adpRank <= 0) return 0;
-  return BASE_VALUE * Math.pow(1 / adpRank, POWER);
-}
-
-export function calcPickValue(
-  round: number,
-  year: number,
-  overallPick?: number,
-  referenceYear: number = CURRENT_DRAFT_YEAR,
-): number {
-  const leagueSize = getLeagueSize(year);
-  // overallPick is the overall draft position (e.g. pick 28 overall).
-  // Use it directly. Only fall back to round midpoint when unknown.
-  const draftPosition = overallPick
-    ? overallPick
-    : ((round - 1) * leagueSize + 1 + round * leagueSize) / 2;
-  const effectiveAdp = draftPosition + getKeeperOffset(year);
-  const discount = getFuturePickDiscount(year, referenceYear);
-  return calcPlayerValue(effectiveAdp) * discount;
-}
-
-export type VerdictSeverity = "fair" | "slight" | "clear" | "robbery";
-
-export interface Verdict {
-  label: string;
-  emoji: string;
-  severity: VerdictSeverity;
-}
-
-export function getVerdict(pctDiff: number): Verdict {
-  const absDiff = Math.abs(pctDiff);
-  if (absDiff <= 5) return { label: "Fair Catch", emoji: "🧤", severity: "fair" };
-  if (absDiff <= 15) return { label: "Edge Rush", emoji: "📈", severity: "slight" };
-  if (absDiff <= 25) return { label: "Pick Six", emoji: "🏆", severity: "clear" };
-  return { label: "Flag on the Play", emoji: "🚩", severity: "robbery" };
-}
+// Future-pick discount, the power-law curve, the rookie premium, positional
+// scarcity, the age curve and the verdict thresholds all live in the spec.
+// They are imported above rather than restated here.
 
 export const SEVERITY_COLORS: Record<VerdictSeverity, { bg: string; border: string; text: string; badge: string }> = {
   fair: { bg: "bg-emerald-500/10", border: "border-emerald-500/30", text: "text-emerald-400", badge: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" },
@@ -148,18 +89,8 @@ export const SEVERITY_COLORS: Record<VerdictSeverity, { bg: string; border: stri
 //   - Post-Super-Bowl offseason → C-Town draft → preseason → NFL regular season
 // Trades after the prior season's Super Bowl belong to the NEXT C-Town season.
 //
-// NFL Week 1 Tuesday dates (same as backfill-trade-verdicts.ts):
-const NFL_WEEK1_TUESDAY_CLIENT: Record<string, string> = {
-  "2018-19": "2018-09-04",
-  "2019-20": "2019-09-03",
-  "2020-21": "2020-09-08",
-  "2021-22": "2021-09-07",
-  "2022-23": "2022-09-06",
-  "2023-24": "2023-09-05",
-  "2024-25": "2024-09-03",
-  "2025-26": "2025-09-02",
-  "2026-27": "2026-09-08", // Projected NFL 2026 Week 1
-};
+// NFL Week 1 Tuesday dates come from the canonical spec (NFL_WEEK1_TUESDAY);
+// this file no longer keeps its own copy of the calendar.
 
 // Super Bowl Sunday is approximately 22–23 weeks after Week 1 (early February).
 // We use Feb 15 of the following year as a conservative cutoff — trades on or
@@ -226,7 +157,7 @@ export function getCTownPhaseDetail(tradeDate: string | null, displaySeason: str
 
   const d = new Date(tradeDate);
   const tradeDateStr = d.toISOString().slice(0, 10);
-  const week1 = NFL_WEEK1_TUESDAY_CLIENT[displaySeason];
+  const week1 = NFL_WEEK1_TUESDAY[displaySeason];
 
   if (!week1) return "offseason";
 
