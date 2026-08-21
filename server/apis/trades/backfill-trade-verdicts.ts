@@ -1,185 +1,34 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
 import { normalizeName, extractKeeperRightsPlayer } from "../../lib/normalize-trade-name.js";
+import {
+  calcPlayerValue as calcValue,
+  computeActualsValue,
+  FAIR_TOLERANCE,
+  getFuturePickDiscount,
+  getKeeperOffset,
+  getLeagueSize,
+  getSeasonPhaseInfo,
+  getUnrankedBaseline,
+  getVerdict,
+  pickToExpectedAdp,
+  RIGHTS_VALUE_MULTIPLIER,
+  seasonToDraftYear,
+  VALUATION_SPEC_FINGERPRINT,
+  VALUATION_SPEC_VERSION,
+} from "../../lib/valuation/valuation-spec.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
-// ─── Value Engine Constants (shared with evaluate-trade.ts) ───
-const BASE_VALUE = 10000;
-const POWER = 0.6;
-const KEEPERS_PER_TEAM = 4;
-const RIGHTS_VALUE_MULTIPLIER = 1.0; // exclusive keeper rights = 100% of underlying player
-
-// C-Town league size by draft year (explicit for all configured years)
-const LEAGUE_SIZE_BY_YEAR: Record<number, number> = {
-  2019: 10, 2020: 10, 2021: 10, 2022: 10, 2023: 10, 2024: 10,
-  2025: 11, 2026: 11, 2027: 11, 2028: 11,
-};
-const DEFAULT_LEAGUE_SIZE = 11;
-
-// ─── Future-pick time discounts ───
-// Applied once: base_pick_value × discount.
-// years_ahead = pick_year − reference_draft_year (the trade's valuation year).
-const FUTURE_PICK_DISCOUNT: Record<number, number> = {
-  0: 1.00,  // same draft year
-  1: 0.80,  // one year ahead
-  2: 0.65,  // two years ahead
-};
-const DEFAULT_FUTURE_DISCOUNT = 0.50; // 3+ years ahead
-
-function getFuturePickDiscount(pickYear: number, referenceDraftYear: number): number {
-  const yearsAhead = Math.max(0, pickYear - referenceDraftYear);
-  return FUTURE_PICK_DISCOUNT[yearsAhead] ?? DEFAULT_FUTURE_DISCOUNT;
-}
-
-// ─── Position-specific unranked baselines ───
-// Used when a player has a resolved identity but no current-season ADP.
-// These represent bottom-tier positional values — never assign zero.
-const UNRANKED_BASELINE: Record<string, number> = {
-  QB: 175,
-  RB: 225,
-  WR: 250,
-  TE: 200,
-  K: 300,
-  DEF: 300,
-};
-const DEFAULT_UNRANKED_BASELINE = 275;
-
-function getUnrankedBaseline(position: string | null): number {
-  if (!position) return DEFAULT_UNRANKED_BASELINE;
-  return UNRANKED_BASELINE[position.toUpperCase()] ?? DEFAULT_UNRANKED_BASELINE;
-}
-
-function getLeagueSize(year: number): number {
-  return LEAGUE_SIZE_BY_YEAR[year] ?? DEFAULT_LEAGUE_SIZE;
-}
-
-function getKeeperOffset(year: number): number {
-  return getLeagueSize(year) * KEEPERS_PER_TEAM;
-}
-
-function pickToExpectedAdp(round: number, year: number, overallPick?: number): number {
-  const leagueSize = getLeagueSize(year);
-  // overallPick is the overall draft position (e.g. pick 28 overall).
-  // Use it directly. Only fall back to round midpoint when unknown.
-  const draftPosition = overallPick
-    ? overallPick
-    : ((round - 1) * leagueSize + 1 + round * leagueSize) / 2;
-  return draftPosition + getKeeperOffset(year);
-}
-
-function calcValue(adpRank: number): number {
-  if (adpRank <= 0) return 0;
-  return BASE_VALUE * Math.pow(1 / adpRank, POWER);
-}
-
-// ─── Verdict thresholds ───
-const FAIR_TOLERANCE = 5;
-const VERDICT_SCALE = 1.0;
-
-function getVerdict(pctDiff: number): { label: string; emoji: string; severity: string } {
-  const absDiff = Math.abs(pctDiff);
-  const t1 = FAIR_TOLERANCE;
-  const t2 = FAIR_TOLERANCE + 10 * VERDICT_SCALE;
-  const t3 = FAIR_TOLERANCE + 20 * VERDICT_SCALE;
-  if (absDiff <= t1) return { label: "Fair Catch", emoji: "🧤", severity: "fair" };
-  if (absDiff <= t2) return { label: "Edge Rush", emoji: "📈", severity: "slight" };
-  if (absDiff <= t3) return { label: "Pick Six", emoji: "🏆", severity: "clear" };
-  return { label: "Flag on the Play", emoji: "🚩", severity: "robbery" };
-}
-
-// ─── Season string → draft year (e.g. "2023-24" → 2024) ───
-function seasonToDraftYear(season: string): number {
-  const parts = season.split("-");
-  if (parts.length === 2 && parts[1].length === 2) {
-    const prefix = parts[0].substring(0, 2);
-    return parseInt(prefix + parts[1], 10);
-  }
-  return parseInt(parts[0], 10) || 2024;
-}
-
-// ─── NFL Season Calendar ───
-const NFL_WEEK1_TUESDAY: Record<string, string> = {
-  "2018-19": "2018-09-04",
-  "2019-20": "2019-09-03",
-  "2020-21": "2020-09-08",
-  "2021-22": "2021-09-07",
-  "2022-23": "2022-09-06",
-  "2023-24": "2023-09-05",
-  "2024-25": "2024-09-03",
-  "2025-26": "2025-09-02",
-};
-
-const REGULAR_SEASON_WEEKS: Record<string, number> = {
-  "2018-19": 17,
-  "2019-20": 17,
-  "2020-21": 17, // 2020 NFL season: 16 games / 17 weeks (pre-expansion)
-  "2021-22": 18, // 2021 NFL season onward: 17 games / 18 weeks
-  "2022-23": 18,
-  "2023-24": 18,
-  "2024-25": 18,
-  "2025-26": 18,
-};
-
-function getSeasonPhaseInfo(tradeDate: string, season: string) {
-  const week1Tuesday = NFL_WEEK1_TUESDAY[season];
-  const totalWeeks = REGULAR_SEASON_WEEKS[season] ?? 18;
-
-  if (!week1Tuesday) {
-    return {
-      lastCompletedWeek: 0,
-      seasonPhase: "preseason" as const,
-      actualsWeight: 0,
-      totalWeeks,
-    };
-  }
-
-  const tradeDateMs = new Date(tradeDate).getTime();
-  const week1Ms = new Date(week1Tuesday).getTime();
-  const msPerWeek = 7 * 24 * 60 * 60 * 1000;
-
-  if (tradeDateMs < week1Ms) {
-    return {
-      lastCompletedWeek: 0,
-      seasonPhase: "preseason" as const,
-      actualsWeight: 0,
-      totalWeeks,
-    };
-  }
-
-  const weeksElapsed = Math.floor((tradeDateMs - week1Ms) / msPerWeek);
-  const lastCompletedWeek = Math.min(weeksElapsed, totalWeeks);
-
-  let seasonPhase: "preseason" | "early" | "mid" | "late" | "postseason";
-  let actualsWeight: number;
-
-  if (lastCompletedWeek === 0) {
-    seasonPhase = "preseason";
-    actualsWeight = 0;
-  } else if (lastCompletedWeek <= 4) {
-    seasonPhase = "early";
-    actualsWeight = 0.10 + (lastCompletedWeek - 1) * (0.10 / 3);
-  } else if (lastCompletedWeek <= 10) {
-    seasonPhase = "mid";
-    actualsWeight = 0.25 + (lastCompletedWeek - 5) * (0.10 / 5);
-  } else if (lastCompletedWeek <= totalWeeks) {
-    seasonPhase = "late";
-    const lateWeeks = totalWeeks - 11 + 1;
-    actualsWeight = 0.40 + (lastCompletedWeek - 11) * (0.10 / (lateWeeks - 1));
-    actualsWeight = Math.min(actualsWeight, 0.50);
-  } else {
-    seasonPhase = "postseason";
-    actualsWeight = 0.85;
-  }
-
-  if (lastCompletedWeek >= totalWeeks) {
-    seasonPhase = "postseason";
-    actualsWeight = 0.85;
-  }
-
-  actualsWeight = Math.round(actualsWeight * 1000) / 1000;
-
-  return { lastCompletedWeek, seasonPhase, actualsWeight, totalWeeks };
-}
+// ─── Value Engine ───
+// Every constant, curve, calendar entry and threshold this backfill uses comes
+// from server/lib/valuation/valuation-spec.ts. Nothing is redeclared here —
+// this file previously carried its own copies of BASE_VALUE, POWER, the league
+// size map, the future-pick discount table, the unranked baselines, the verdict
+// thresholds and the NFL calendar, which is precisely how the ledger and the
+// Exchange drifted apart.
+//
+// Verdict cutoffs remain FAIR_TOLERANCE / +10 / +20, so re-running this backfill
+// reproduces the existing historical verdicts unchanged.
 
 // ─── Weekly actuals computation ───
 interface WeeklyActualsRow {
@@ -297,9 +146,10 @@ function computePositionalPercentiles(
         ? Math.round(((ppgTotal - ppgRank + 1) / ppgTotal) * 100 * 10) / 10
         : 0;
 
-      const actualsValue = Math.round(
-        (0.60 * totalPtsPercentile + 0.40 * ppgPercentile) * 10
-      ) / 10;
+      // 60/40 pts-vs-PPG split lives in the spec (ACTUALS_PTS_WEIGHT /
+      // ACTUALS_PPG_WEIGHT) so the ledger, the provenance report and the
+      // actuals API cannot drift apart on the blend.
+      const actualsValue = computeActualsValue(totalPtsPercentile, ppgPercentile);
 
       result.set(p.normalizedName, actualsValue);
     }
@@ -488,6 +338,11 @@ export default api({
     tradesGenuinelyBlocked: z.array(z.number()),
     // Per-asset detail for full audit report
     assetDetails: z.array(AssetDetailEntry),
+    // Which build of the canonical valuation spec produced these verdicts.
+    valuationSpec: z.object({
+      version: z.string(),
+      fingerprint: z.string(),
+    }),
   }),
 
   async run(ctx, { dryRun, forceRecompute }) {
@@ -529,6 +384,10 @@ export default api({
         unresolvedAssets: [], uniqueUnresolvedNames: [],
         tradesWithFallback: [], tradesGenuinelyBlocked: [],
         assetDetails: [],
+        valuationSpec: {
+          version: VALUATION_SPEC_VERSION,
+          fingerprint: VALUATION_SPEC_FINGERPRINT,
+        },
       };
     }
 
@@ -1363,6 +1222,10 @@ export default api({
       tradesWithFallback: [...tradesWithFallbackSet],
       tradesGenuinelyBlocked: [...tradesGenuinelyBlockedSet],
       assetDetails: allAssetDetails,
+      valuationSpec: {
+        version: VALUATION_SPEC_VERSION,
+        fingerprint: VALUATION_SPEC_FINGERPRINT,
+      },
     };
   },
 });

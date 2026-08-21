@@ -1,35 +1,28 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
 import { normalizeName } from "../../lib/normalize-trade-name.js";
+import { requireAdmin } from "../../lib/auth/require-admin.js";
+import {
+  computeActualsValue,
+  getSeasonPhaseInfo as getCanonicalSeasonPhaseInfo,
+  NFL_WEEK1_TUESDAY,
+  REGULAR_SEASON_WEEKS,
+  VALUATION_SPEC_FINGERPRINT,
+  VALUATION_SPEC_VERSION,
+} from "../../lib/valuation/valuation-spec.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
-// ─── NFL Season Calendar ─────────────────────────────────────
-// Maps fantasy season → NFL Week 1 start date (Tuesday of Week 1)
-// Week 1 games typically start Thursday; we use Tuesday as the
-// week-start boundary so that a trade on Wednesday of Week 1
-// sees zero completed weeks (Week 1 hasn't finished yet).
-const NFL_WEEK1_TUESDAY: Record<string, string> = {
-  "2018-19": "2018-09-04",
-  "2019-20": "2019-09-03",
-  "2020-21": "2020-09-08",
-  "2021-22": "2021-09-07",
-  "2022-23": "2022-09-06",
-  "2023-24": "2023-09-05",
-  "2024-25": "2024-09-03",
-  "2025-26": "2025-09-02",
-};
-
-// Number of regular-season weeks per season
-const REGULAR_SEASON_WEEKS: Record<string, number> = {
-  "2018-19": 17,  // 16-game era: weeks 1-17 (week 17 = final)
-  "2019-20": 17,
-  "2020-21": 18,  // 17-game era starts 2021: weeks 1-18
-  "2021-22": 18,
-  "2022-23": 18,
-  "2023-24": 18,
-  "2024-25": 18,
-  "2025-26": 18,
-};
+// ─── NFL Season Calendar ─────────────────────────────────
+// The calendar and the phase/weight curve now come from the canonical spec.
+//
+// This file previously kept its own copy of REGULAR_SEASON_WEEKS that recorded
+// the 2020-21 season as 18 weeks. Every other engine — the backfill, the
+// provenance report and the verdict audit — recorded it as 17, which is what
+// the 2020 NFL season actually was (16 games / 17 weeks; the 17-game, 18-week
+// era began in 2021). That single-key disagreement moved the late-season
+// ramp and the postseason cutoff for 2020-21 trades, so the same trade could
+// be blended at a different weight here than in the ledger. Importing the
+// spec removes the divergence.
 
 /**
  * Given a trade date and season, determine:
@@ -38,88 +31,32 @@ const REGULAR_SEASON_WEEKS: Record<string, number> = {
  * - actualsWeight: automatic phase-based weight (0.0 - 0.85)
  * - cutoffDate: the last date whose weekly data is included
  *
- * A week is "completed" when the following Tuesday arrives.
- * Week N runs from Tuesday of Week N through Monday night.
+ * Thin wrapper over the canonical getSeasonPhaseInfo. The only thing added
+ * here is `cutoffDate`, which is specific to how this API slices weekly rows
+ * and is derived from the canonical `lastCompletedWeek` — never recomputed.
  */
 function getSeasonPhaseInfo(tradeDate: string, season: string) {
+  const phase = getCanonicalSeasonPhaseInfo(tradeDate, season);
   const week1Tuesday = NFL_WEEK1_TUESDAY[season];
-  const totalWeeks = REGULAR_SEASON_WEEKS[season] ?? 18;
 
   if (!week1Tuesday) {
-    // Unknown season — treat as preseason (baseline only)
-    return {
-      lastCompletedWeek: 0,
-      seasonPhase: "preseason" as const,
-      actualsWeight: 0,
-      cutoffDate: tradeDate,
-      totalWeeks,
-    };
+    // Unknown season — canonical spec reports preseason; keep the trade date
+    // as the cutoff so downstream week filtering selects nothing.
+    return { ...phase, cutoffDate: tradeDate };
   }
 
-  const tradeDateMs = new Date(tradeDate).getTime();
-  const week1Ms = new Date(week1Tuesday).getTime();
   const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+  const week1Ms = new Date(week1Tuesday).getTime();
 
-  if (tradeDateMs < week1Ms) {
-    // Before Week 1 — preseason
-    return {
-      lastCompletedWeek: 0,
-      seasonPhase: "preseason" as const,
-      actualsWeight: 0,
-      cutoffDate: tradeDate,
-      totalWeeks,
-    };
+  if (phase.lastCompletedWeek === 0) {
+    return { ...phase, cutoffDate: tradeDate };
   }
-
-  // Weeks elapsed since Week 1 Tuesday
-  // A week is "completed" when the NEXT Tuesday arrives
-  // So on Tuesday of Week 2, Week 1 is completed
-  const weeksElapsed = Math.floor((tradeDateMs - week1Ms) / msPerWeek);
-  const lastCompletedWeek = Math.min(weeksElapsed, totalWeeks);
-
-  // Season phase and default actuals weight
-  let seasonPhase: "preseason" | "early" | "mid" | "late" | "postseason";
-  let actualsWeight: number;
-
-  if (lastCompletedWeek === 0) {
-    seasonPhase = "preseason";
-    actualsWeight = 0;
-  } else if (lastCompletedWeek <= 4) {
-    // Weeks 1-4: early season — 10-20% graduated
-    seasonPhase = "early";
-    // Linear: week 1 = 10%, week 4 = 20%
-    actualsWeight = 0.10 + (lastCompletedWeek - 1) * (0.10 / 3);
-  } else if (lastCompletedWeek <= 10) {
-    // Weeks 5-10: mid season — 25-35% graduated
-    seasonPhase = "mid";
-    actualsWeight = 0.25 + (lastCompletedWeek - 5) * (0.10 / 5);
-  } else if (lastCompletedWeek <= totalWeeks) {
-    // Weeks 11-17/18: late season — 40-50% graduated
-    seasonPhase = "late";
-    const lateWeeks = totalWeeks - 11 + 1; // 7 or 8 weeks
-    actualsWeight = 0.40 + (lastCompletedWeek - 11) * (0.10 / (lateWeeks - 1));
-    // Cap at 0.50 for end of regular season
-    actualsWeight = Math.min(actualsWeight, 0.50);
-  } else {
-    // Past end of regular season — postseason
-    seasonPhase = "postseason";
-    actualsWeight = 0.85;
-  }
-
-  // If all weeks completed, it's postseason
-  if (lastCompletedWeek >= totalWeeks) {
-    seasonPhase = "postseason";
-    actualsWeight = 0.85;
-  }
-
-  // Round weight to 3 decimal places
-  actualsWeight = Math.round(actualsWeight * 1000) / 1000;
 
   // Cutoff date = Tuesday after last completed week
-  const cutoffMs = week1Ms + lastCompletedWeek * msPerWeek;
+  const cutoffMs = week1Ms + phase.lastCompletedWeek * msPerWeek;
   const cutoffDate = new Date(cutoffMs).toISOString().slice(0, 10);
 
-  return { lastCompletedWeek, seasonPhase, actualsWeight, cutoffDate, totalWeeks };
+  return { ...phase, cutoffDate };
 }
 
 // ─── Schemas ─────────────────────────────────────────────────
@@ -246,10 +183,8 @@ function computePositionalPercentiles(
         ? Math.round(((ppgTotal - ppgRank + 1) / ppgTotal) * 100 * 10) / 10
         : 0;
 
-      // Spec formula: 60% total-pts percentile + 40% PPG percentile
-      const actualsValue = Math.round(
-        (0.60 * totalPtsPercentile + 0.40 * ppgPercentile) * 10
-      ) / 10;
+      // Spec formula: ACTUALS_PTS_WEIGHT total-pts + ACTUALS_PPG_WEIGHT PPG.
+      const actualsValue = computeActualsValue(totalPtsPercentile, ppgPercentile);
 
       result.set(p.normalizedName, {
         totalPtsPercentile,
@@ -330,11 +265,26 @@ export default api({
     results: z.array(TradeActualsResultSchema),
     seasonsLoaded: z.array(z.string()),
     totalPlayersProcessed: z.number(),
+    // Which build of the canonical valuation spec produced these weights.
+    valuationSpec: z.object({
+      version: z.string(),
+      fingerprint: z.string(),
+    }),
   }),
 
   async run(ctx, { trades }) {
+    requireAdmin(ctx, "compute trade actuals");
+
     if (trades.length === 0) {
-      return { results: [], seasonsLoaded: [], totalPlayersProcessed: 0 };
+      return {
+        results: [],
+        seasonsLoaded: [],
+        totalPlayersProcessed: 0,
+        valuationSpec: {
+          version: VALUATION_SPEC_VERSION,
+          fingerprint: VALUATION_SPEC_FINGERPRINT,
+        },
+      };
     }
 
     // ── Step 1: Determine which seasons we need actuals for ──
@@ -548,6 +498,10 @@ export default api({
       results,
       seasonsLoaded: [...seasonsNeeded],
       totalPlayersProcessed,
+      valuationSpec: {
+        version: VALUATION_SPEC_VERSION,
+        fingerprint: VALUATION_SPEC_FINGERPRINT,
+      },
     };
   },
 });

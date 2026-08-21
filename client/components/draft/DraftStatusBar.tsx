@@ -1,10 +1,29 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router";
+import { useApiData } from "@/hooks/useApiData";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { getTeamEmoji, type DraftPick, type Team, type Player } from "@/lib/draft-constants";
+import { CURRENT_SEASON, getSeasonPhaseInfo } from "@/lib/valuation/valuation-spec";
 import seasonXxLogo from "@/public/logos/season-xx.png";
+
+/** Human-readable season phase labels */
+const PHASE_LABEL: Record<string, string> = {
+  preseason: "Preseason",
+  early: "Early Season",
+  mid: "Mid Season",
+  late: "Late Season",
+  postseason: "Postseason",
+};
+
+const PHASE_COLOR: Record<string, string> = {
+  preseason: "text-zinc-400 bg-zinc-500/10 border-zinc-500/30",
+  early: "text-sky-400 bg-sky-500/10 border-sky-500/30",
+  mid: "text-amber-400 bg-amber-500/10 border-amber-500/30",
+  late: "text-orange-400 bg-orange-500/10 border-orange-500/30",
+  postseason: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30",
+};
 
 type DraftStatusBarProps = {
   picks: DraftPick[];
@@ -14,6 +33,20 @@ type DraftStatusBarProps = {
 
 export default function DraftStatusBar({ picks, teams, players }: DraftStatusBarProps) {
   const navigate = useNavigate();
+
+  // Season phase + actuals freshness
+  const phaseInfo = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return getSeasonPhaseInfo(today, CURRENT_SEASON);
+  }, []);
+
+  const { data: actualsData } = useApiData("GetLoadedActualSeasons", {}, { staleTime: 60_000 });
+  const currentActualsWeek = useMemo(() => {
+    if (!actualsData?.seasons) return null;
+    const s = actualsData.seasons.find((s: { season: string }) => s.season === CURRENT_SEASON);
+    return s?.throughWeek ?? null;
+  }, [actualsData]);
+
   const currentPick = useMemo(() => {
     return picks.find((p) => !p.is_complete) ?? null;
   }, [picks]);
@@ -162,6 +195,29 @@ export default function DraftStatusBar({ picks, teams, players }: DraftStatusBar
           </div>
         </div>
       )}
+
+      {/* Season Phase Indicator */}
+      <div className={cn(
+        "flex items-center gap-1.5 rounded-md border px-2 py-1 shrink-0",
+        PHASE_COLOR[phaseInfo.seasonPhase] ?? PHASE_COLOR.preseason,
+      )}>
+        <div>
+          <div className="text-[9px] uppercase tracking-wider font-medium leading-none opacity-70">
+            {CURRENT_SEASON}
+          </div>
+          <div className="text-[10px] font-bold leading-tight">
+            {PHASE_LABEL[phaseInfo.seasonPhase] ?? "Preseason"}
+            {currentActualsWeek != null && currentActualsWeek > 0 && (
+              <span className="font-normal opacity-80"> · Wk {currentActualsWeek}</span>
+            )}
+          </div>
+        </div>
+        {phaseInfo.actualsWeight > 0 && (
+          <span className="text-[9px] font-mono opacity-60" title="Actuals weight in valuations">
+            {Math.round(phaseInfo.actualsWeight * 100)}%
+          </span>
+        )}
+      </div>
 
       {/* Settings */}
       <Button

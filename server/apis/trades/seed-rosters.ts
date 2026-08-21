@@ -1,4 +1,5 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
+import { requireAdmin } from "../../lib/auth/require-admin.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
@@ -173,6 +174,8 @@ export default api({
   }),
 
   async run(ctx, { action }) {
+    requireAdmin(ctx, "seed rosters and treasury");
+
     let treasury2027Updated = 0;
     let rostersSeeded = 0;
     let playersCreated = 0;

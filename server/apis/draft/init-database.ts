@@ -1,4 +1,5 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
+import { requireAdmin } from "../../lib/auth/require-admin.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
@@ -10,15 +11,15 @@ export default api({
     apps_db: postgres(APPS_DB),
   },
 
-  input: z.object({
-    force: z.boolean().optional().default(false),
-  }),
+  input: z.object({}),  // [Phase 1] force flag removed — no destructive reset allowed
 
   output: z.object({
     message: z.string(),
   }),
 
-  async run(ctx, { force }) {
+  async run(ctx) {
+    requireAdmin(ctx, "initialize the database");
+
     // ── 1. Create tables ────────────────────────────────────────────
     await ctx.integrations.apps_db.execute(
       `CREATE TABLE IF NOT EXISTS ffwr_teams (
@@ -100,6 +101,7 @@ export default api({
         ALTER TABLE ffwr_players ADD COLUMN IF NOT EXISTS sos TEXT;
         ALTER TABLE ffwr_players ADD COLUMN IF NOT EXISTS age INT;
         ALTER TABLE ffwr_players ADD COLUMN IF NOT EXISTS dynasty_tier INT;
+        ALTER TABLE ffwr_players ADD COLUMN IF NOT EXISTS is_write_in BOOLEAN DEFAULT FALSE;
         ALTER TABLE ffwr_players ADD CONSTRAINT ffwr_players_name_pos_uq UNIQUE (name, position);
       EXCEPTION WHEN duplicate_table THEN NULL;
                WHEN duplicate_column THEN NULL;
@@ -125,12 +127,10 @@ export default api({
       undefined,
       { label: "Check team count" }
     );
-    if (countResult[0].cnt > 0 && !force) {
+    if (countResult[0].cnt > 0) {
       return { message: "Database already initialized. Use Settings to re-seed or upload CSVs." };
     }
-    if (force) {
-      await ctx.integrations.apps_db.execute("TRUNCATE ffwr_draft_picks, ffwr_player_tags, ffwr_players, ffwr_teams RESTART IDENTITY CASCADE", undefined, { label: "Force reset: truncate all tables" });
-    }
+    // [Phase 1] TRUNCATE path removed — tables can only be created, never force-wiped
 
     // ── 3. Seed 11 real teams ─────────────────────────────────────────
     const teams = [

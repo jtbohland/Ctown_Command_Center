@@ -13,6 +13,10 @@ interface DraftCapitalRow {
   current_team_id: number;
   original_team_name: string;
   current_team_name: string;
+  /** For 2026 rows merged from the draft board: the slot position in the round */
+  pick_in_round?: number;
+  /** For 2026 rows merged from the draft board: the overall draft slot */
+  overall_pick?: number;
 }
 
 interface Team {
@@ -111,24 +115,58 @@ export default function DraftCapitalView({ draftCapital, teams, draftPicks2026 }
     return Array.from(s).sort();
   }, [draftCapital]);
 
-  // Convert 2026 draft picks into DraftCapitalRow format (must be before `filtered`).
-  // Uses pick_in_round as original_team_id since team_id == draft_position for all 11 teams.
+  // For 2026, merge draft_capital ownership into draft_picks board order.
+  // draft_capital is the source of truth for original_team_id (who originally
+  // owned the pick) and current_team_id (who owns it now after trades).
+  // draft_picks gives us the slot order (pick_in_round, overall_pick) that
+  // the draft board uses. We match them by round + current_team_id.
   const capital2026 = useMemo(() => {
     if (!draftPicks2026 || draftPicks2026.length === 0) return [];
+
+    // Build a lookup: for each (round, current_team_id) → list of capital rows
+    const capitalByRoundOwner = new Map<string, DraftCapitalRow[]>();
+    for (const dc of draftCapital) {
+      if (dc.year !== 2026) continue;
+      const key = `${dc.round}-${dc.current_team_id}`;
+      const list = capitalByRoundOwner.get(key) ?? [];
+      list.push(dc);
+      capitalByRoundOwner.set(key, list);
+    }
+
     return draftPicks2026.map((dp, idx) => {
-      const ownerTeam = teams.find((t) => t.id === dp.team_id);
-      const originalTeam = teams.find((t) => t.id === dp.pick_in_round) ?? ownerTeam;
+      const key = `${dp.round}-${dp.team_id}`;
+      const candidates = capitalByRoundOwner.get(key) ?? [];
+      // Pop from the list so each capital row is used exactly once
+      const match = candidates.shift();
+
+      if (match) {
+        return {
+          id: match.id,
+          year: 2026,
+          round: dp.round,
+          original_team_id: match.original_team_id,
+          current_team_id: match.current_team_id,
+          original_team_name: match.original_team_name,
+          current_team_name: match.current_team_name,
+          pick_in_round: dp.pick_in_round,
+          overall_pick: dp.overall_pick,
+        } as DraftCapitalRow;
+      }
+
+      // Fallback: own pick (not traded)
       return {
         id: -(idx + 1),
         year: 2026,
         round: dp.round,
-        original_team_id: originalTeam?.id ?? dp.team_id,
+        original_team_id: dp.team_id,
         current_team_id: dp.team_id,
-        original_team_name: originalTeam?.team_name ?? dp.team_name,
+        original_team_name: dp.team_name,
         current_team_name: dp.team_name,
+        pick_in_round: dp.pick_in_round,
+        overall_pick: dp.overall_pick,
       } as DraftCapitalRow;
     });
-  }, [draftPicks2026, teams]);
+  }, [draftPicks2026, draftCapital, teams]);
 
   const filtered = useMemo(() => {
     const yr = Number(yearFilter);
@@ -269,16 +307,10 @@ export default function DraftCapitalView({ draftCapital, teams, draftPicks2026 }
                     <div className="flex flex-wrap gap-1">
                       {picks.sort((a, b) => a.year - b.year || a.round - b.round).map((p) => {
                         const isAcquired = p.original_team_id !== team.id;
-                        // For 2026 picks, match by original_team_id → pick_in_round for unique targeting
-                        // (original_team_id == pick_in_round because team_id == draft_position for all teams)
                         const is2026 = p.year === 2026;
-                        const draftBoardPick = is2026 && draftPicks2026
-                          ? draftPicks2026.find(
-                              (dp) => dp.round === p.round && dp.pick_in_round === p.original_team_id
-                            )
-                          : null;
-                        const pickLabel = is2026 && draftBoardPick
-                          ? `Rd${p.round} Pick ${draftBoardPick.pick_in_round} (#${draftBoardPick.overall_pick})`
+                        // Use slot info embedded in the capital row (set during capital2026 merge)
+                        const pickLabel = is2026 && p.pick_in_round != null && p.overall_pick != null
+                          ? `Rd${p.round} Pick ${p.pick_in_round} (#${p.overall_pick})`
                           : `${p.year} Rd${p.round}`;
                         return (
                           <Badge

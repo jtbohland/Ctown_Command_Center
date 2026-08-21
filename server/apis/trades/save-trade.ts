@@ -1,4 +1,6 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
+import { CURRENT_DRAFT_YEAR } from "../../lib/valuation/valuation-spec.js";
+import { requireAdmin } from "../../lib/auth/require-admin.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
@@ -30,6 +32,13 @@ export default api({
     period: z.string(),
     notes: z.string().nullable(),
     assets: z.array(AssetInputSchema),
+    /**
+     * When true, validate and plan the trade WITHOUT writing anything.
+     * Duplicate detection and trade-number lookup still run (both read-only),
+     * and the full cascade plan is returned, but no INSERT/UPDATE is issued.
+     * Lets the trade path be exercised safely against the live league DB.
+     */
+    dryRun: z.boolean().nullable(),
   }),
 
   output: z.object({
@@ -38,9 +47,29 @@ export default api({
     tradeNumber: z.number(),
     playersMovedCount: z.number(),
     picksMovedCount: z.number(),
+    /** True when the call was planned only and nothing was persisted. */
+    dryRun: z.boolean(),
   }),
 
-  async run(ctx, { teamAId, teamBId, teamCId, season, period, notes, assets }) {
+  async run(ctx, { teamAId, teamBId, teamCId, season, period, notes, assets, dryRun }) {
+    const isDryRun = dryRun === true;
+
+    // Authorization gate — must run before any query or write.
+    // Enforced even for dry runs so the preview path cannot be used to probe
+    // league data (duplicate detection reads real trades).
+    requireAdmin(ctx, isDryRun ? "preview a trade" : "save a trade");
+
+    // [Phase 4] Explicit error states — reject obviously invalid input
+    if (assets.length === 0) {
+      throw new Error("Cannot save a trade with zero assets. Add at least one player or pick.");
+    }
+    if (teamAId === teamBId) {
+      throw new Error("Team A and Team B must be different teams.");
+    }
+    if (teamCId != null && (teamCId === teamAId || teamCId === teamBId)) {
+      throw new Error("Team C must be different from Teams A and B.");
+    }
+
     const isThreeTeam = teamCId != null;
     const tradeType = isThreeTeam ? "three-team" : "two-team";
     const participantCount = isThreeTeam ? 3 : 2;
@@ -133,153 +162,164 @@ export default api({
     );
     const nextTradeNumber = (maxRow?.max_num ?? 0) + 1;
 
-    // Insert trade with three-team fields
-    const InsertSchema = z.object({ id: z.coerce.number() });
-    const [inserted] = await ctx.integrations.apps_db.query(
-      `INSERT INTO ffwr_trades (trade_number, season, trade_date, team_a_id, team_b_id, team_c_id, trade_type, participant_count, status, period, notes)
-       VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, $7, 'completed', $8, $9)
-       RETURNING id`,
-      InsertSchema,
-      [nextTradeNumber, season, teamAId, teamBId, teamCId, tradeType, participantCount, period, notes],
-      { label: "Insert trade record" }
-    );
+    // ── Plan the trade (pure — no writes) ────────────────────────
+    // Resolve every recipient and derive the roster / draft-board / treasury
+    // moves BEFORE touching the database. This lets a dry run report exactly
+    // what would happen, and keeps planning logic identical on both paths.
+    const destinationExplicit = isThreeTeam;
 
-    const tradeId = inserted.id;
+    const plannedAssets = assets.map((asset) => ({
+      asset,
+      // Determine recipient: explicit for 3-team, inferred for 2-team
+      recipientTeamId: isThreeTeam
+        ? asset.recipientTeamId!
+        : (asset.fromTeamId === teamAId ? teamBId : teamAId),
+    }));
 
-    // Track cascading updates
     const pickMoves: Array<{ year: number; round: number; fromTeamId: number; toTeamId: number; pickNumber: number | null }> = [];
     const playerMoves: Array<{ playerName: string; toTeamId: number }> = [];
 
-    for (const asset of assets) {
-      // Determine recipient: explicit for 3-team, inferred for 2-team
-      const recipientTeamId = isThreeTeam
-        ? asset.recipientTeamId!
-        : (asset.fromTeamId === teamAId ? teamBId : teamAId);
-
-      const destinationExplicit = isThreeTeam;
-
+    for (const { asset, recipientTeamId } of plannedAssets) {
       if (asset.type === "player") {
-        await ctx.integrations.apps_db.execute(
-          `INSERT INTO ffwr_trade_assets (trade_id, from_team_id, recipient_team_id, destination_explicit, asset_type, player_name, player_position)
-           VALUES ($1, $2, $3, $4, 'player', $5, $6)`,
-          [tradeId, asset.fromTeamId, recipientTeamId, destinationExplicit, asset.playerName, asset.playerPosition],
-          { label: `Insert player asset: ${asset.playerName}` }
-        );
-
         // Track player move for roster cascade
         if (asset.playerName) {
           playerMoves.push({ playerName: asset.playerName, toTeamId: recipientTeamId });
         }
-      } else {
-        await ctx.integrations.apps_db.execute(
-          `INSERT INTO ffwr_trade_assets (trade_id, from_team_id, recipient_team_id, destination_explicit, asset_type, pick_year, pick_round, pick_number)
-           VALUES ($1, $2, $3, $4, 'pick', $5, $6, $7)`,
-          [tradeId, asset.fromTeamId, recipientTeamId, destinationExplicit, asset.pickYear, asset.pickRound, asset.pickNumber],
-          { label: `Insert pick asset: ${asset.pickYear} Rd ${asset.pickRound}` }
-        );
-
+      } else if (asset.pickYear && asset.pickRound) {
         // Track pick move for draft board + treasury cascade
-        if (asset.pickYear && asset.pickRound) {
-          pickMoves.push({
-            year: asset.pickYear,
-            round: asset.pickRound,
-            fromTeamId: asset.fromTeamId,
-            toTeamId: recipientTeamId,
-            pickNumber: asset.pickNumber ?? null,
-          });
-        }
+        pickMoves.push({
+          year: asset.pickYear,
+          round: asset.pickRound,
+          fromTeamId: asset.fromTeamId,
+          toTeamId: recipientTeamId,
+          pickNumber: asset.pickNumber ?? null,
+        });
       }
     }
 
-    // ── Cascade 1: Roster updates (drafted_team_id + roster_team_id) ──
-    for (const move of playerMoves) {
-      await ctx.integrations.apps_db.execute(
-        `UPDATE ffwr_players
-         SET drafted_team_id = $1, roster_team_id = $1
-         WHERE LOWER(name) = LOWER($2) AND is_drafted = true`,
-        [move.toTeamId, move.playerName],
-        { label: `Roster move: ${move.playerName} → team ${move.toTeamId}` }
-      );
-    }
-
-    // ── Cascade 2: Draft Board (ffwr_draft_picks.team_id) — current year only ──
-    // Uses overall_pick (pickNumber) when available for exact targeting.
-    // Falls back to LIMIT 1 subselect to move only ONE pick when a team holds multiples.
-    const CURRENT_DRAFT_YEAR = 2026;
-    for (const move of pickMoves) {
-      if (move.year === CURRENT_DRAFT_YEAR) {
-        if (move.pickNumber) {
-          // Exact target: overall_pick uniquely identifies a draft board slot
-          await ctx.integrations.apps_db.execute(
-            `UPDATE ffwr_draft_picks
-             SET team_id = $1
-             WHERE overall_pick = $2`,
-            [move.toTeamId, move.pickNumber],
-            { label: `Draft board: pick #${move.pickNumber} → team ${move.toTeamId}` }
-          );
-        } else {
-          // Fallback: move exactly ONE pick for this round owned by fromTeam
-          await ctx.integrations.apps_db.execute(
-            `UPDATE ffwr_draft_picks
-             SET team_id = $1
-             WHERE id = (
-               SELECT id FROM ffwr_draft_picks
-               WHERE round = $2 AND team_id = $3
-               LIMIT 1
-             )`,
-            [move.toTeamId, move.round, move.fromTeamId],
-            { label: `Draft board: Rd ${move.round} slot → team ${move.toTeamId} (one pick)` }
-          );
-        }
-      }
-    }
-
-    // ── Cascade 3: Treasury (ffwr_draft_capital.current_team_id) ──
-    // Uses pickNumber → original_team_id for exact targeting on 2026 picks.
-    // Falls back to LIMIT 1 subselect to move only ONE capital row when a team holds multiples.
-    for (const move of pickMoves) {
-      if (move.year === CURRENT_DRAFT_YEAR && move.pickNumber) {
-        // 2026 with known overall_pick: derive original_team_id from draft board
-        // pick_in_round in ffwr_draft_picks == original_team_id in ffwr_draft_capital
-        // (because team_id == draft_position for all 11 teams)
-        await ctx.integrations.apps_db.execute(
-          `UPDATE ffwr_draft_capital
-           SET current_team_id = $1
-           WHERE year = $2 AND round = $3
-             AND original_team_id = (
-               SELECT pick_in_round FROM ffwr_draft_picks WHERE overall_pick = $4 LIMIT 1
-             )`,
-          [move.toTeamId, move.year, move.round, move.pickNumber],
-          { label: `Treasury: ${move.year} Rd ${move.round} pick #${move.pickNumber} → team ${move.toTeamId}` }
-        );
-      } else {
-        // Future picks or unknown pickNumber: move exactly ONE capital row
-        await ctx.integrations.apps_db.execute(
-          `UPDATE ffwr_draft_capital
-           SET current_team_id = $1
-           WHERE id = (
-             SELECT id FROM ffwr_draft_capital
-             WHERE year = $2 AND round = $3 AND current_team_id = $4
-             LIMIT 1
-           )`,
-          [move.toTeamId, move.year, move.round, move.fromTeamId],
-          { label: `Treasury: ${move.year} Rd ${move.round} → team ${move.toTeamId} (one pick)` }
-        );
-      }
-    }
-
-    // Build summary
+    // Build summary (shared by dry run and real save)
     const parts: string[] = [];
     if (playerMoves.length > 0) parts.push(`${playerMoves.length} player${playerMoves.length > 1 ? "s" : ""} moved`);
     if (pickMoves.length > 0) parts.push(`${pickMoves.length} pick${pickMoves.length > 1 ? "s" : ""} reassigned`);
     const summary = parts.length > 0 ? ` — ${parts.join(", ")}` : "";
 
+    // ── Dry run short-circuit — everything below this line writes ──
+    if (isDryRun) {
+      return {
+        message: `Dry run OK — Trade #${nextTradeNumber} would be saved${summary}. No changes were written.`,
+        tradeId: -1,
+        tradeNumber: nextTradeNumber,
+        playersMovedCount: playerMoves.length,
+        picksMovedCount: pickMoves.length,
+        dryRun: true,
+      };
+    }
+
+    // ── Atomic write — single PL/pgSQL block ─────────────────────
+    // The SDK has no BEGIN/COMMIT, but PL/pgSQL DO blocks run inside an
+    // implicit transaction. If any statement in the block fails, the entire
+    // block rolls back — no partial trade, no orphan assets, no dangling
+    // pick ownership changes.
+    //
+    // We build the SQL string in JS from the pure plan computed above and
+    // send it in one `execute()` call, then retrieve the new trade_id with
+    // a follow-up read (the DO block cannot RETURN values).
+
+    /** Escape a string for use inside a SQL literal (double single-quotes). */
+    const esc = (v: string | null | undefined): string =>
+      v == null ? "NULL" : `'${String(v).replace(/'/g, "''")}'`;
+    const num = (v: number | null | undefined): string =>
+      v == null ? "NULL" : String(Number(v));
+
+    // ── Build asset INSERT values ──
+    const assetValues = plannedAssets.map(({ asset, recipientTeamId }) => {
+      if (asset.type === "player") {
+        return `(new_trade_id, ${num(asset.fromTeamId)}, ${num(recipientTeamId)}, ${destinationExplicit}, 'player', ${esc(asset.playerName)}, ${esc(asset.playerPosition)}, NULL, NULL, NULL)`;
+      }
+      return `(new_trade_id, ${num(asset.fromTeamId)}, ${num(recipientTeamId)}, ${destinationExplicit}, 'pick', NULL, NULL, ${num(asset.pickYear)}, ${num(asset.pickRound)}, ${num(asset.pickNumber)})`;
+    });
+
+    // ── Build cascade statements ──
+    const cascadeStmts: string[] = [];
+
+    // Cascade 1: Roster moves
+    for (const move of playerMoves) {
+      cascadeStmts.push(
+        `UPDATE ffwr_players SET drafted_team_id = ${num(move.toTeamId)}, roster_team_id = ${num(move.toTeamId)} WHERE LOWER(name) = LOWER(${esc(move.playerName)}) AND is_drafted = true;`
+      );
+    }
+
+    // Cascade 2: Draft board (current year only)
+    for (const move of pickMoves) {
+      if (move.year === CURRENT_DRAFT_YEAR) {
+        if (move.pickNumber) {
+          cascadeStmts.push(
+            `UPDATE ffwr_draft_picks SET team_id = ${num(move.toTeamId)} WHERE overall_pick = ${num(move.pickNumber)};`
+          );
+        } else {
+          cascadeStmts.push(
+            `UPDATE ffwr_draft_picks SET team_id = ${num(move.toTeamId)} WHERE id = (SELECT id FROM ffwr_draft_picks WHERE round = ${num(move.round)} AND team_id = ${num(move.fromTeamId)} LIMIT 1);`
+          );
+        }
+      }
+    }
+
+    // Cascade 3: Treasury
+    for (const move of pickMoves) {
+      if (move.year === CURRENT_DRAFT_YEAR && move.pickNumber) {
+        cascadeStmts.push(
+          `UPDATE ffwr_draft_capital SET current_team_id = ${num(move.toTeamId)} WHERE year = ${num(move.year)} AND round = ${num(move.round)} AND original_team_id = (SELECT pick_in_round FROM ffwr_draft_picks WHERE overall_pick = ${num(move.pickNumber)} LIMIT 1);`
+        );
+      } else {
+        cascadeStmts.push(
+          `UPDATE ffwr_draft_capital SET current_team_id = ${num(move.toTeamId)} WHERE id = (SELECT id FROM ffwr_draft_capital WHERE year = ${num(move.year)} AND round = ${num(move.round)} AND current_team_id = ${num(move.fromTeamId)} LIMIT 1);`
+        );
+      }
+    }
+
+    const atomicSql = `
+      DO $$
+      DECLARE
+        new_trade_id INT;
+      BEGIN
+        -- 1. Insert the trade record
+        INSERT INTO ffwr_trades (trade_number, season, trade_date, team_a_id, team_b_id, team_c_id, trade_type, participant_count, status, period, notes)
+        VALUES (${num(nextTradeNumber)}, ${esc(season)}, CURRENT_DATE, ${num(teamAId)}, ${num(teamBId)}, ${num(teamCId)}, ${esc(tradeType)}, ${num(participantCount)}, 'completed', ${esc(period)}, ${esc(notes)})
+        RETURNING id INTO new_trade_id;
+
+        -- 2. Insert all trade assets
+        INSERT INTO ffwr_trade_assets (trade_id, from_team_id, recipient_team_id, destination_explicit, asset_type, player_name, player_position, pick_year, pick_round, pick_number)
+        VALUES ${assetValues.join(",\n               ")};
+
+        -- 3. Cascade roster, draft board, and treasury updates
+        ${cascadeStmts.join("\n        ")}
+      END $$;
+    `;
+
+    await ctx.integrations.apps_db.execute(atomicSql, undefined, {
+      label: `Atomic SaveTrade #${nextTradeNumber} (${plannedAssets.length} assets, ${playerMoves.length} roster moves, ${pickMoves.length} pick moves)`,
+    });
+
+    // Retrieve the trade_id we just created (DO blocks can't return values)
+    const InsertSchema = z.object({ id: z.coerce.number() });
+    const [inserted] = await ctx.integrations.apps_db.query(
+      `SELECT id FROM ffwr_trades WHERE trade_number = $1 AND season = $2 ORDER BY id DESC LIMIT 1`,
+      InsertSchema,
+      [nextTradeNumber, season],
+      { label: "Retrieve new trade ID" }
+    );
+
+    if (!inserted) {
+      throw new Error(`Atomic write appeared to succeed but trade #${nextTradeNumber} was not found — this should never happen.`);
+    }
+
     return {
       message: `Trade #${nextTradeNumber} saved successfully!${summary}`,
-      tradeId,
+      tradeId: inserted.id,
       tradeNumber: nextTradeNumber,
       playersMovedCount: playerMoves.length,
       picksMovedCount: pickMoves.length,
+      dryRun: false,
     };
   },
 });

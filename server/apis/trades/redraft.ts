@@ -1,4 +1,5 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
+import { requireAdmin } from "../../lib/auth/require-admin.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
@@ -22,11 +23,7 @@ export default api({
   }),
 
   async run(ctx) {
-    // Only the commissioner (JT) can execute redraft
-    const ADMIN_EMAIL = "jt.bohland@amplitude.com";
-    if (ctx.user?.email !== ADMIN_EMAIL) {
-      throw new Error("Only the commissioner can perform a Redux Redraft.");
-    }
+    requireAdmin(ctx, "perform a Redux Redraft");
 
     // Check if roster_team_id column exists (it gets created by SeedRosters)
     const [{ exists: colExists }] = await ctx.integrations.apps_db.query(

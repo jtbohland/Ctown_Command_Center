@@ -30,22 +30,6 @@ export default api({
   }),
 
   async run(ctx) {
-    // Ensure table exists first
-    await ctx.integrations.apps_db.execute(
-      `CREATE TABLE IF NOT EXISTS ffwr_league_records (
-        id SERIAL PRIMARY KEY,
-        category VARCHAR(100) NOT NULL,
-        season VARCHAR(20),
-        filename VARCHAR(255) NOT NULL,
-        file_content TEXT NOT NULL,
-        uploaded_at TIMESTAMPTZ DEFAULT NOW(),
-        uploaded_by VARCHAR(255),
-        notes TEXT
-      )`,
-      undefined,
-      { label: "Ensure ffwr_league_records table exists" }
-    );
-
     const records = await ctx.integrations.apps_db.query(
       `SELECT id, category, season, filename, uploaded_at, uploaded_by, notes,
               LENGTH(file_content) as size_bytes

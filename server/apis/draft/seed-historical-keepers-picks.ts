@@ -1,5 +1,6 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
 import { normalizePlayerName } from "../../lib/normalize-player-name.js";
+import { requireAdmin } from "../../lib/auth/require-admin.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
@@ -33,6 +34,8 @@ export default api({
   }),
 
   async run(ctx, { keepersCsv, draftPicksCsv }) {
+    requireAdmin(ctx, "seed historical keepers and picks");
+
     if (!keepersCsv && !draftPicksCsv) {
       throw new Error("Provide at least one CSV: keepersCsv or draftPicksCsv");
     }

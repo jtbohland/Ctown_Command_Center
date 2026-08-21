@@ -2,23 +2,43 @@
 // Shared type + defaults for the 11 slider-driven parameters
 // that control The C-Town Exchange valuation engine.
 
+// Every slider that dials a canonical value takes its NEUTRAL POSITION from
+// the valuation spec. At the defaults below the Exchange reproduces the
+// canonical engine exactly — the sliders are deviations from the spec, never
+// a second source of truth for it.
+
+import {
+  FAIR_TOLERANCE,
+  POSITIONAL_SCARCITY,
+  POWER,
+  ROOKIE_MAX_BOOST,
+} from "./valuation/valuation-spec";
+
+/**
+ * Neutral position of the future-pick dial. The engine treats this value as
+ * intensity 1.0 on the canonical step discount table (1.00 / 0.80 / 0.65 /
+ * 0.50), NOT as a per-year geometric penalty. Raising it deepens every step;
+ * setting it to 0 disables future-pick discounting.
+ */
+export const NEUTRAL_FUTURE_PICK_DIAL = 0.10;
+
 export interface TradeModifiers {
   // Positional scarcity multipliers (1.0 = no effect)
-  qbScarcity: number;      // Default 1.08 — top-5 QB boost
+  qbScarcity: number;      // Neutral: POSITIONAL_SCARCITY — top-5 QB boost
   tePremium: number;        // Default 1.00 — top-5 TE boost (off by default)
   rbPremium: number;        // Default 1.00 — RB value multiplier
   wrPremium: number;        // Default 1.00 — WR value multiplier
 
   // Dynasty factors
-  rookieHype: number;       // Default 0.20 — max rookie boost for #1 overall
+  rookieHype: number;       // Neutral: ROOKIE_MAX_BOOST — max rookie boost for #1 overall
   ageCurve: number;         // Default 1.0  — multiplier on age factor deviation (0=off, 2=aggressive)
-  futurePickDiscount: number; // Default 0.10 — per-year penalty for future picks (10% per year)
+  futurePickDiscount: number; // Neutral: NEUTRAL_FUTURE_PICK_DIAL — intensity on the canonical step table
 
   // Model shape
-  valueCurve: number;       // Default 0.6  — power law exponent (higher = steeper dropoff)
+  valueCurve: number;       // Neutral: POWER — power law exponent (higher = steeper dropoff)
 
   // Verdict calibration
-  fairTolerance: number;    // Default 5    — ±% for "Fair Catch"
+  fairTolerance: number;    // Neutral: FAIR_TOLERANCE — ±% for "Fair Catch"
   verdictScale: number;     // Default 1.0  — multiplier on verdict thresholds (lower = stricter)
 
   // Fallback valuation
@@ -29,15 +49,15 @@ export interface TradeModifiers {
 }
 
 export const DEFAULT_MODIFIERS: TradeModifiers = {
-  qbScarcity: 1.08,
+  qbScarcity: POSITIONAL_SCARCITY,
   tePremium: 1.00,
   rbPremium: 1.00,
   wrPremium: 1.00,
-  rookieHype: 0.20,
+  rookieHype: ROOKIE_MAX_BOOST,
   ageCurve: 1.0,
-  futurePickDiscount: 0.10,
-  valueCurve: 0.6,
-  fairTolerance: 5,
+  futurePickDiscount: NEUTRAL_FUTURE_PICK_DIAL,
+  valueCurve: POWER,
+  fairTolerance: FAIR_TOLERANCE,
   verdictScale: 1.0,
   unrankedFallbackFactor: 0.50,
   dejaVuSensitivity: 3,
@@ -66,7 +86,7 @@ export const SLIDER_CONFIGS: SliderConfig[] = [
     label: "QB Scarcity",
     description: "Boost for top-5 QBs by ADP",
     min: 1.00, max: 1.25, step: 0.01,
-    defaultValue: 1.08,
+    defaultValue: POSITIONAL_SCARCITY,
     format: (v) => v === 1.0 ? "Off" : `+${Math.round((v - 1) * 100)}%`,
     category: "positional",
   },
@@ -104,7 +124,7 @@ export const SLIDER_CONFIGS: SliderConfig[] = [
     label: "Rookie Hype",
     description: "Max dynasty boost for NFL #1 overall pick",
     min: 0.00, max: 0.40, step: 0.01,
-    defaultValue: 0.20,
+    defaultValue: ROOKIE_MAX_BOOST,
     format: (v) => v === 0 ? "Off" : `+${Math.round(v * 100)}%`,
     category: "dynasty",
   },
@@ -120,10 +140,18 @@ export const SLIDER_CONFIGS: SliderConfig[] = [
   {
     key: "futurePickDiscount",
     label: "Future Pick Discount",
-    description: "Value penalty per year into the future",
+    description:
+      "Intensity of the league's future-pick discount (1yr 80%, 2yr 65%, 3yr+ 50%). Normal reproduces the canonical table.",
     min: 0.00, max: 0.25, step: 0.01,
-    defaultValue: 0.10,
-    format: (v) => v === 0 ? "Off" : `-${Math.round(v * 100)}%/yr`,
+    defaultValue: NEUTRAL_FUTURE_PICK_DIAL,
+    format: (v) =>
+      v === 0
+        ? "Off"
+        : v === NEUTRAL_FUTURE_PICK_DIAL
+          ? "Normal"
+          : v < NEUTRAL_FUTURE_PICK_DIAL
+            ? "Softer"
+            : "Harsher",
     category: "dynasty",
   },
 
@@ -133,7 +161,7 @@ export const SLIDER_CONFIGS: SliderConfig[] = [
     label: "Value Curve Steepness",
     description: "How fast value drops after ADP #1 (higher = steeper)",
     min: 0.3, max: 0.9, step: 0.05,
-    defaultValue: 0.6,
+    defaultValue: POWER,
     format: (v) => v <= 0.4 ? "Flat" : v <= 0.55 ? "Gentle" : v <= 0.7 ? "Normal" : "Steep",
     category: "model",
   },
@@ -144,7 +172,7 @@ export const SLIDER_CONFIGS: SliderConfig[] = [
     label: "Fair Trade Tolerance",
     description: "% gap considered 'Fair Catch'",
     min: 1, max: 15, step: 1,
-    defaultValue: 5,
+    defaultValue: FAIR_TOLERANCE,
     format: (v) => `±${v}%`,
     category: "verdict",
   },

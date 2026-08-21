@@ -1,4 +1,5 @@
 import { api, z, postgres, readableFileSchema } from "@superblocksteam/sdk-api";
+import { requireAdmin } from "../../lib/auth/require-admin.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
@@ -91,6 +92,8 @@ export default api({
   }),
 
   async run(ctx, { csvFile, yearLabel, dryRun, forceReplace }) {
+    requireAdmin(ctx, "seed actuals data from file");
+
     const season = yearToSeason(yearLabel);
     const file = csvFile.files[0];
     const filename = file.name;
