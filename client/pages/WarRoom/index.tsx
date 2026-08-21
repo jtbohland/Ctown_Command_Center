@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { useApiData } from "@/hooks/useApiData";
 import { useApi } from "@/hooks/useApi";
 import { queryClient } from "@superblocksteam/library";
@@ -37,6 +37,14 @@ export default function WarRoom() {
   const { run: toggleTag } = useApi("TogglePlayerTag");
   const { run: manageKeeper } = useApi("ManageKeepers");
   const { run: initDb, loading: initLoading } = useApi("InitDatabase");
+  const { run: redraft } = useApi("Redraft");
+  const hasAutoRedraftedRef = useRef(false);
+
+  const handleFirstPickStart = useCallback(() => {
+    if (hasAutoRedraftedRef.current) return;
+    hasAutoRedraftedRef.current = true;
+    redraft({}).catch(() => {});
+  }, [redraft]);
 
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -298,7 +306,12 @@ export default function WarRoom() {
 
         {/* Pick Timer */}
         {mainView === "board" && (
-          <PickTimer isMyPick={isMyPick} currentPickId={currentPick?.id ?? null} />
+          <PickTimer
+            isMyPick={isMyPick}
+            currentPickId={currentPick?.id ?? null}
+            currentOverallPick={currentPick?.overall_pick ?? 0}
+            onFirstPickStart={handleFirstPickStart}
+          />
         )}
 
         {/* Side panel toggles (only when on board view) */}
@@ -426,12 +439,10 @@ export default function WarRoom() {
         loading={draftingPlayer}
       />
 
-      {/* Draft Day Trade Modal */}
+      {/* Draft Day Trade Modal (SirenSale-powered) */}
       <DraftDayTradeModal
         open={tradeModalOpen}
         onOpenChange={setTradeModalOpen}
-        teams={teams}
-        picks={picks}
       />
     </div>
   );

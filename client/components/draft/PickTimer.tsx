@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 type PickTimerProps = {
   isMyPick: boolean;
   currentPickId: number | null;
+  currentOverallPick?: number;
+  onFirstPickStart?: () => void;
 };
 
 const DEFAULT_SECONDS = 300; // 5 minutes
@@ -53,10 +55,11 @@ function timerBgColor(pct: number): string {
   return `hsla(${Math.round(hue)}, 80%, 40%, 0.12)`;
 }
 
-const PickTimer = memo(function PickTimer({ isMyPick, currentPickId }: PickTimerProps) {
+const PickTimer = memo(function PickTimer({ isMyPick, currentPickId, currentOverallPick, onFirstPickStart }: PickTimerProps) {
   const [seconds, setSeconds] = useState(DEFAULT_SECONDS);
   const [running, setRunning] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hasTriggeredFirstPickRef = useRef(false);
 
   // Reset timer when pick changes
   useEffect(() => {
@@ -101,9 +104,15 @@ const PickTimer = memo(function PickTimer({ isMyPick, currentPickId }: PickTimer
       setSeconds(DEFAULT_SECONDS);
       setRunning(true);
     } else {
-      setRunning((r) => !r);
+      const willRun = !running;
+      setRunning(willRun);
+      // Fire once when pick-1 timer starts
+      if (willRun && currentOverallPick === 1 && !hasTriggeredFirstPickRef.current) {
+        hasTriggeredFirstPickRef.current = true;
+        onFirstPickStart?.();
+      }
     }
-  }, [seconds]);
+  }, [seconds, running, currentOverallPick, onFirstPickStart]);
 
   const resetTimer = useCallback(() => {
     setSeconds(DEFAULT_SECONDS);
