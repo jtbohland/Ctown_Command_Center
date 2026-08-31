@@ -285,13 +285,15 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
     const allPicks = teamGrades.flatMap((tg) =>
       tg.picks.map((gp) => ({ ...gp, teamName: tg.teamName })),
     );
+    // ADP differential: positive = drafted later than ADP (fell = great value)
+    const adpDiff = (gp: (typeof allPicks)[0]) => (gp.player.adp_rank ?? 999) - gp.pick.overall_pick;
     const steals = [...allPicks]
-      .filter((p) => p.classification === "steal")
-      .sort((a, b) => b.score - a.score)
+      .filter((p) => p.classification === "steal" && p.player.adp_rank != null)
+      .sort((a, b) => adpDiff(b) - adpDiff(a))
       .slice(0, 5);
     const reaches = [...allPicks]
-      .filter((p) => p.classification === "reach" || p.classification === "positional_waste")
-      .sort((a, b) => a.score - b.score)
+      .filter((p) => (p.classification === "reach" || p.classification === "positional_waste") && p.player.adp_rank != null)
+      .sort((a, b) => adpDiff(a) - adpDiff(b))
       .slice(0, 5);
     const perfect = [...allPicks]
       .filter((p) => p.player.adp_rank != null)
