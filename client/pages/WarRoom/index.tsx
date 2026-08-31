@@ -21,6 +21,7 @@ import MockDraftTab from "@/components/draft/MockDraftTab";
 import ArmChairDealer from "@/components/draft/ArmChairDealer";
 import DraftPickDialog from "@/components/draft/DraftPickDialog";
 import DraftDayTradeModal from "@/components/draft/DraftDayTradeModal";
+import DraftCelebration from "@/components/draft/DraftCelebration";
 import type { TagKey, Player } from "@/lib/draft-constants";
 import ctownReduxLogo from "@/public/logos/ctown-redux.png";
 
@@ -76,6 +77,11 @@ export default function WarRoom() {
   }, [picks]);
 
   const isMyPick = currentPick?.is_my_team ?? false;
+
+  const isDraftComplete = useMemo(
+    () => picks.length > 0 && picks.every((p) => p.is_complete),
+    [picks],
+  );
 
   const handleDraft = useCallback(
     (playerId: number) => {
@@ -444,6 +450,9 @@ export default function WarRoom() {
         open={tradeModalOpen}
         onOpenChange={setTradeModalOpen}
       />
+
+      {/* Draft Complete Celebration */}
+      <DraftCelebration isDraftComplete={isDraftComplete} />
     </div>
   );
 }

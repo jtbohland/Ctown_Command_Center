@@ -35,6 +35,8 @@ import Redraft from './trades/redraft.js';
 // [Phase 1] De-registered: FixActualsSeasons (UPDATE, no safe default)
 import SeedHistoricalKeepersPicks from './draft/seed-historical-keepers-picks.js';
 import WriteInPlayer from './draft/write-in-player.js';
+import GenerateDraftRecap from './draft/generate-draft-recap.js';
+import ArchiveDraft from './draft/archive-draft.js';
 import InitLeagueRecords from './settings/init-league-records.js';
 import SaveLeagueRecord from './settings/save-league-record.js';
 import GetLeagueRecords from './settings/get-league-records.js';
@@ -87,6 +89,8 @@ const apis = {
 
   SeedHistoricalKeepersPicks,
   WriteInPlayer,
+  GenerateDraftRecap,
+  ArchiveDraft,
   InitLeagueRecords,
   SaveLeagueRecord,
   GetLeagueRecords,

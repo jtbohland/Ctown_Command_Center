@@ -1,43 +1,262 @@
-import { useMemo, memo } from "react";
+import { useMemo, useState, useCallback, memo } from "react";
+import { useApi } from "@/hooks/useApi";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import PositionBadge from "./PositionBadge";
 import { cn } from "@/lib/utils";
 import { getTeamEmoji, type Player, type Team, type DraftPick } from "@/lib/draft-constants";
+import {
+  gradeDraft,
+  gradeColor,
+  gradeBg,
+  rankMedal,
+  classificationEmoji,
+  classificationLabel,
+  type TeamGrade,
+  type GradedPick,
+} from "@/lib/draft-grading";
 
+// ─── Types ──────────────────────────────────────────────────
 type DraftRecapProps = {
   players: Player[];
   teams: Team[];
   picks: DraftPick[];
 };
 
-type TeamGrade = {
-  team: Team;
-  picks: { player: Player; pick: DraftPick; value: number }[];
-  totalValue: number;
-  avgValue: number;
-  bestSteal: { player: Player; value: number } | null;
-  biggestReach: { player: Player; value: number } | null;
-  grade: string;
-};
+// ─── Pick Row ───────────────────────────────────────────────
+const PickRow = memo(function PickRow({ gp }: { gp: GradedPick }) {
+  const { player, pick, classification, score, boardContext, overallBpaRank, adpFallBonus } = gp;
+  const [open, setOpen] = useState(false);
 
-function letterGrade(avgVal: number): string {
-  if (avgVal >= 8) return "A+";
-  if (avgVal >= 5) return "A";
-  if (avgVal >= 2) return "B+";
-  if (avgVal >= 0) return "B";
-  if (avgVal >= -3) return "C+";
-  if (avgVal >= -6) return "C";
-  return "D";
-}
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          "flex items-center gap-1.5 text-[11px] py-[3px] w-full text-left rounded-sm transition-colors cursor-pointer",
+          open ? "bg-white/[0.04]" : "hover:bg-white/[0.02]",
+        )}
+      >
+        <span className="text-muted-foreground font-mono w-8 text-right shrink-0">
+          {pick.round}.{String(pick.pick_in_round).padStart(2, "0")}
+        </span>
+        <span className="w-4 text-center shrink-0" title={classificationLabel(classification)}>
+          {classificationEmoji(classification)}
+        </span>
+        <span className="w-7 shrink-0"><PositionBadge position={player.position} /></span>
+        <span className="flex-1 min-w-0 truncate">{player.name}</span>
+        <span className="text-[10px] text-muted-foreground shrink-0 w-12 text-right tabular-nums">
+          {player.adp_rank ?? "—"}
+        </span>
+        <span className="text-[10px] text-muted-foreground shrink-0 w-12 text-right tabular-nums">
+          #{overallBpaRank}
+        </span>
+        <span
+          className={cn(
+            "text-[10px] font-mono font-bold shrink-0 w-8 text-right tabular-nums",
+            score > 0 ? "text-green-400" : score < 0 ? "text-red-400" : "text-muted-foreground",
+          )}
+        >
+          {score > 0 ? "+" : ""}{score}
+        </span>
+        <Icon
+          icon={open ? "chevron-up" : "chevron-down"}
+          className="h-3 w-3 text-muted-foreground/40 shrink-0"
+        />
+      </button>
 
-function gradeColor(grade: string): string {
-  if (grade.startsWith("A")) return "text-green-400";
-  if (grade.startsWith("B")) return "text-blue-400";
-  if (grade.startsWith("C")) return "text-amber-400";
-  return "text-red-400";
-}
+      {/* Board context dropdown */}
+      {open && boardContext.length > 0 && (
+        <div className="ml-[52px] mr-6 mb-1.5 mt-0.5 rounded border border-border/40 bg-black/20 px-2.5 py-1.5">
+          <p className="text-[9px] uppercase tracking-wider text-muted-foreground/60 font-semibold mb-1">
+            Best available on the board at this pick
+          </p>
+          {boardContext.map((alt, i) => (
+            <div
+              key={i}
+              className="flex items-center gap-1.5 text-[10px] py-[2px]"
+            >
+              <span className="text-muted-foreground/50 w-4 text-right font-mono">{i + 1}.</span>
+              <PositionBadge position={alt.position} />
+              <span className="flex-1 min-w-0 truncate text-muted-foreground">
+                {alt.name}
+              </span>
+              <span className="text-[9px] text-muted-foreground/60 tabular-nums">
+                ADP {alt.adpRank}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
+      {/* QB/TE fall bonus indicator */}
+      {adpFallBonus >= 40 && !open && (
+        <span className="text-green-400/70 text-[9px] ml-[52px]" title={`Fell ${adpFallBonus} spots in available pool`}>
+          ⬇️ Fell {adpFallBonus} spots — value grab
+        </span>
+      )}
+    </div>
+  );
+});
+
+// ─── Team Card ──────────────────────────────────────────────
+const TeamRecapCard = memo(function TeamRecapCard({
+  tg,
+  aiSummary,
+  leagueAvg,
+}: {
+  tg: TeamGrade;
+  aiSummary: string | null;
+  leagueAvg: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className={cn("rounded-lg border p-3 space-y-2", gradeBg(tg.grade))}>
+      {/* Header: rank + name + grade */}
+      <div className="flex items-center gap-2">
+        <span className="text-lg font-black min-w-[36px] text-center">
+          {rankMedal(tg.rank)}
+        </span>
+        <span
+          className="w-3 h-3 rounded-full ring-1 ring-white/10 shrink-0"
+          style={{ backgroundColor: tg.color }}
+        />
+        <div className="flex-1 min-w-0">
+          <span className="text-sm font-semibold truncate block">
+            {getTeamEmoji(tg.teamName)} {tg.teamName}
+            {tg.isMyTeam && <span className="text-primary ml-1 text-[10px]">(YOU)</span>}
+          </span>
+          <span className="text-[10px] text-muted-foreground">{tg.managerName}</span>
+        </div>
+        <span className={cn("text-2xl font-black", gradeColor(tg.grade))}>
+          {tg.grade}
+        </span>
+      </div>
+
+      {/* Stats row */}
+      <div className="flex items-center gap-3 text-[10px] text-muted-foreground flex-wrap">
+        <span>
+          Score:{" "}
+          <span className={cn("font-bold", tg.totalScore > 0 ? "text-green-400" : tg.totalScore < 0 ? "text-red-400" : "")}>
+            {tg.totalScore > 0 ? "+" : ""}{tg.totalScore}
+          </span>
+        </span>
+        <span>
+          Avg:{" "}
+          <span className={cn("font-bold", tg.avgScore > leagueAvg ? "text-green-400" : tg.avgScore < leagueAvg ? "text-red-400" : "")}>
+            {tg.avgScore > 0 ? "+" : ""}{tg.avgScore.toFixed(1)}
+          </span>
+        </span>
+        <span className="text-green-400 font-semibold">
+          🎯 {tg.stealCount} steal{tg.stealCount !== 1 ? "s" : ""}
+        </span>
+        <span className="text-red-400 font-semibold">
+          📉 {tg.reachCount} reach{tg.reachCount !== 1 ? "es" : ""}
+        </span>
+        {tg.wasteCount > 0 && (
+          <span className="text-orange-400 font-semibold">
+            🗑️ {tg.wasteCount} waste{tg.wasteCount !== 1 ? "s" : ""}
+          </span>
+        )}
+        <span>{tg.picks.length} picks</span>
+      </div>
+
+      {/* Position breakdown */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {Object.entries(tg.posCounts)
+          .sort(([a], [b]) => {
+            const order = ["QB", "RB", "WR", "TE", "K", "DST"];
+            return order.indexOf(a) - order.indexOf(b);
+          })
+          .map(([pos, count]) => (
+            <span key={pos} className="flex items-center gap-0.5">
+              <PositionBadge position={pos} />
+              <span className="text-[10px] text-muted-foreground font-mono">×{count}</span>
+            </span>
+          ))}
+      </div>
+
+      {/* Best Steal & Biggest Reach */}
+      <div className="space-y-1">
+        {tg.bestSteal && (
+          <div className="text-[10px]">
+            <span className="text-green-400 font-semibold">🎯 Best steal:</span>{" "}
+            <span className="text-foreground">{tg.bestSteal.player.name}</span>{" "}
+            <PositionBadge position={tg.bestSteal.player.position} />{" "}
+            <span className="text-muted-foreground">
+              at {tg.bestSteal.pick.round}.{String(tg.bestSteal.pick.pick_in_round).padStart(2, "0")}
+              {" "}— BPA #{tg.bestSteal.overallBpaRank}
+            </span>{" "}
+            <span className="text-green-400 font-bold">+{tg.bestSteal.score}</span>
+          </div>
+        )}
+        {tg.biggestReach && (
+          <div className="text-[10px]">
+            <span className="text-red-400 font-semibold">📉 Biggest reach:</span>{" "}
+            <span className="text-foreground">{tg.biggestReach.player.name}</span>{" "}
+            <PositionBadge position={tg.biggestReach.player.position} />{" "}
+            <span className="text-muted-foreground">
+              at {tg.biggestReach.pick.round}.{String(tg.biggestReach.pick.pick_in_round).padStart(2, "0")}
+              {" "}— BPA #{tg.biggestReach.overallBpaRank}
+            </span>{" "}
+            <span className="text-red-400 font-bold">{tg.biggestReach.score}</span>
+            {tg.biggestReach.receipts.length > 0 && (
+              <span className="text-muted-foreground ml-1">
+                (passed on {tg.biggestReach.receipts.map((r) => r.name).join(", ")})
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* AI Summary */}
+      {aiSummary && (
+        <div className="text-[11px] text-muted-foreground/90 leading-relaxed italic border-l-2 border-primary/30 pl-2 mt-1">
+          {aiSummary}
+        </div>
+      )}
+
+      {/* Expand/collapse picks list */}
+      <button
+        onClick={() => setExpanded((e) => !e)}
+        className="flex items-center gap-1 text-[10px] text-primary/70 hover:text-primary transition-colors cursor-pointer"
+      >
+        <Icon icon={expanded ? "chevron-up" : "chevron-down"} className="h-3 w-3" />
+        {expanded ? "Hide" : "Show"} all picks
+      </button>
+
+      {expanded && (
+        <div className="pt-1 border-t border-border/50">
+          {/* Column headers */}
+          <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground/60 uppercase tracking-wider font-semibold pb-1 mb-0.5 border-b border-border/30">
+            <span className="w-8 text-right shrink-0">Pick</span>
+            <span className="w-4 shrink-0" />
+            <span className="w-7 shrink-0" />
+            <span className="flex-1 min-w-0">Player</span>
+            <span className="shrink-0 w-12 text-right">ADP</span>
+            <span className="shrink-0 w-12 text-right">BPA #</span>
+            <span className="shrink-0 w-8 text-right">Val</span>
+            <span className="w-4 shrink-0" />
+          </div>
+          <div className="space-y-0">
+            {tg.picks.map((gp) => (
+              <PickRow key={gp.pick.id} gp={gp} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+// ─── Main Component ─────────────────────────────────────────
 const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftRecapProps) {
+  const { run: generateRecap, loading: aiLoading, data: aiData } = useApi("GenerateDraftRecap");
+  const [aiRequested, setAiRequested] = useState(false);
+
   const completedPicks = useMemo(
     () => picks.filter((p) => p.is_complete && p.player_id),
     [picks],
@@ -45,41 +264,55 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
 
   const isDraftComplete = completedPicks.length === picks.length && picks.length > 0;
 
-  const teamGrades = useMemo<TeamGrade[]>(() => {
-    return teams.map((team) => {
-      const teamPicks = completedPicks
-        .filter((p) => p.team_id === team.id)
-        .map((pick) => {
-          const player = players.find((pl) => pl.id === pick.player_id);
-          if (!player) return null;
-          const value = (player.adp_rank ?? pick.overall_pick) - pick.overall_pick;
-          return { player, pick, value };
-        })
-        .filter(Boolean) as TeamGrade["picks"];
+  const { teamGrades, leagueAvg } = useMemo(
+    () => gradeDraft(players, picks, teams),
+    [players, picks, teams],
+  );
 
-      const totalValue = teamPicks.reduce((sum, p) => sum + p.value, 0);
-      const avgValue = teamPicks.length > 0 ? totalValue / teamPicks.length : 0;
+  // Build AI summary map
+  const aiSummaryMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (aiData?.summaries) {
+      for (const s of aiData.summaries) {
+        map.set(s.teamName, s.summary);
+      }
+    }
+    return map;
+  }, [aiData]);
 
-      const bestSteal = teamPicks.length > 0
-        ? teamPicks.reduce((best, p) => (p.value > best.value ? p : best))
-        : null;
-      const biggestReach = teamPicks.length > 0
-        ? teamPicks.reduce((worst, p) => (p.value < worst.value ? p : worst))
-        : null;
-
-      return {
-        team,
-        picks: teamPicks,
-        totalValue,
-        avgValue,
-        bestSteal: bestSteal ? { player: bestSteal.player, value: bestSteal.value } : null,
-        biggestReach: biggestReach && biggestReach.value < 0
-          ? { player: biggestReach.player, value: biggestReach.value }
-          : null,
-        grade: letterGrade(avgValue),
-      };
-    }).sort((a, b) => b.totalValue - a.totalValue);
-  }, [teams, completedPicks, players]);
+  const handleGenerateAI = useCallback(async () => {
+    setAiRequested(true);
+    try {
+      await generateRecap({
+        leagueAvgValue: leagueAvg,
+        teams: teamGrades.map((tg) => ({
+          teamName: tg.teamName,
+          managerName: tg.managerName,
+          rank: tg.rank,
+          grade: tg.grade,
+          totalValue: tg.totalScore,
+          avgValue: tg.avgScore,
+          stealCount: tg.stealCount,
+          reachCount: tg.reachCount,
+          wasteCount: tg.wasteCount,
+          picks: tg.picks.map((gp) => ({
+            playerName: gp.player.name,
+            position: gp.player.position,
+            round: gp.pick.round,
+            pickInRound: gp.pick.pick_in_round,
+            overallPick: gp.pick.overall_pick,
+            adpRank: gp.player.adp_rank,
+            value: gp.score,
+            classification: gp.classification,
+            bpaRank: gp.overallBpaRank,
+            receipts: gp.receipts.map((r) => `${r.name} (${r.position})`),
+          })),
+        })),
+      });
+    } catch {
+      // error is available via the hook
+    }
+  }, [generateRecap, teamGrades, leagueAvg]);
 
   if (completedPicks.length === 0) {
     return (
@@ -92,82 +325,63 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
 
   return (
     <ScrollArea className="h-full">
-      <div className="p-4 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold">
-            {isDraftComplete ? "Final Draft Recap" : "Draft Recap (In Progress)"}
-          </h2>
-          <span className="text-xs text-muted-foreground">
-            {completedPicks.length}/{picks.length} picks made
-          </span>
+      <div className="p-4 space-y-4 max-w-5xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h2 className="text-lg font-bold">
+              {isDraftComplete ? "🏆 Final Draft Recap" : "📊 Draft Recap (In Progress)"}
+            </h2>
+            <span className="text-xs text-muted-foreground">
+              {completedPicks.length}/{picks.length} picks • Board-aware BPA grading • League avg:{" "}
+              <span className={cn("font-bold", leagueAvg > 0 ? "text-green-400" : leagueAvg < 0 ? "text-red-400" : "")}>
+                {leagueAvg > 0 ? "+" : ""}{leagueAvg.toFixed(1)}
+              </span>
+            </span>
+          </div>
+          {isDraftComplete && !aiRequested && (
+            <Button size="sm" variant="outline" onClick={handleGenerateAI} disabled={aiLoading} className="gap-1.5">
+              <Icon icon="sparkles" className="h-3.5 w-3.5" />
+              Generate AI Summaries
+            </Button>
+          )}
+          {aiLoading && (
+            <span className="text-xs text-muted-foreground animate-pulse">
+              ✨ Gemini is analyzing the draft...
+            </span>
+          )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          {teamGrades.map(({ team, picks: teamPicks, totalValue, grade, bestSteal, biggestReach }) => (
-            <div key={team.id} className="rounded-lg border border-border p-3 space-y-2">
-              {/* Team header */}
-              <div className="flex items-center gap-2">
-                <span
-                  className="w-3 h-3 rounded-full ring-1 ring-white/10 shrink-0"
-                  style={{ backgroundColor: team.color }}
-                />
-                <span className="text-sm font-semibold flex-1 truncate">
-                  {getTeamEmoji(team.team_name)} {team.team_name}
-                  {team.is_my_team && <span className="text-primary ml-1 text-[10px]">(YOU)</span>}
-                </span>
-                <span className={cn("text-xl font-black", gradeColor(grade))}>
-                  {grade}
-                </span>
-              </div>
+        {/* Legend */}
+        <div className="rounded-lg border border-border/50 bg-card/50 p-3 text-[11px] text-muted-foreground space-y-1.5">
+          <p className="font-semibold text-foreground text-xs">How Board-Aware BPA (Best Player Available) Grading Works</p>
+          <p>
+            <strong>BPA = Best Player Available.</strong> For every pick, we simulate who was still on the board at that moment — <strong>keepers are excluded</strong> from the pool
+            (they were never available). Then we rank the pick against the best remaining players.
+          </p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+            <p>🎯 <strong className="text-green-400">Steal</strong> — Took a top-3 available RB/WR at their position</p>
+            <p>✅ <strong className="text-blue-400">Right Pick</strong> — Solid value, top-7 available RB/WR</p>
+            <p>📉 <strong className="text-red-400">Reach</strong> — Passed on clearly better RB/WR (receipts shown)</p>
+            <p>🗑️ <strong className="text-orange-400">Pos. Waste</strong> — 2nd QB/TE when quality RB/WR was on board</p>
+          </div>
+          <p>
+            <strong>QB/TE bonus:</strong> If a QB or TE fell 40+ ADP spots in the available pool, it counts as a steal (value grab).
+          </p>
+          <p>
+            <strong>Grades</strong> are curved 1→{teams.length} — top scorer gets A+, bottom gets F. Scores sum each pick's BPA rating.
+          </p>
+        </div>
 
-              {/* Value summary */}
-              <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-                <span>
-                  Value:{" "}
-                  <span className={cn("font-bold", totalValue > 0 ? "text-green-400" : totalValue < 0 ? "text-red-400" : "")}>
-                    {totalValue > 0 ? "+" : ""}{totalValue}
-                  </span>
-                </span>
-                <span>{teamPicks.length} picks</span>
-              </div>
-
-              {/* Best steal & biggest reach */}
-              {bestSteal && bestSteal.value > 0 && (
-                <div className="text-[10px]">
-                  <span className="text-green-400 font-semibold">Best steal:</span>{" "}
-                  <span className="text-foreground">{bestSteal.player.name}</span>{" "}
-                  <span className="text-green-400/70">(+{bestSteal.value})</span>
-                </div>
-              )}
-              {biggestReach && (
-                <div className="text-[10px]">
-                  <span className="text-red-400 font-semibold">Biggest reach:</span>{" "}
-                  <span className="text-foreground">{biggestReach.player.name}</span>{" "}
-                  <span className="text-red-400/70">({biggestReach.value})</span>
-                </div>
-              )}
-
-              {/* Picks list */}
-              <div className="space-y-0.5 pt-1 border-t border-border/50">
-                {teamPicks.map(({ player, pick, value }) => (
-                  <div key={pick.id} className="flex items-center gap-1.5 text-[11px]">
-                    <span className="text-muted-foreground font-mono w-8 text-right shrink-0">
-                      {pick.round}.{String(pick.pick_in_round).padStart(2, "0")}
-                    </span>
-                    <PositionBadge position={player.position} />
-                    <span className="flex-1 truncate">{player.name}</span>
-                    <span
-                      className={cn(
-                        "text-[10px] font-mono font-bold shrink-0",
-                        value > 0 ? "text-green-400" : value < 0 ? "text-red-400" : "text-muted-foreground",
-                      )}
-                    >
-                      {value > 0 ? "+" : ""}{value}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+        {/* Team Cards */}
+        <div className="space-y-3">
+          {teamGrades.map((tg) => (
+            <TeamRecapCard
+              key={tg.teamId}
+              tg={tg}
+              aiSummary={aiSummaryMap.get(tg.teamName) ?? null}
+              leagueAvg={leagueAvg}
+            />
           ))}
         </div>
       </div>
