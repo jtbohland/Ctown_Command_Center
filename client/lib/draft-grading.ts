@@ -194,17 +194,21 @@ export function gradeDraft(
       .slice(0, 3)
       .map((p) => ({ name: p.name, position: p.position, adpRank: p.adp_rank ?? 999 }));
 
-    // Top 5 best available players across ALL positions (for board context dropdown)
-    // Only include players who were actually drafted later in the draft
-    const boardContext = available
-      .filter((p) => p.id !== player.id && actuallyDraftedIds.has(p.id))
-      .slice(0, 5)
-      .map((p) => ({
-        name: p.name,
-        position: p.position,
-        adpRank: p.adp_rank ?? 999,
-        wasDrafted: true,
-      }));
+    // Top 5 board alternatives for the context dropdown.
+    // Prioritize RB/WR (the premium positions the grading is based on),
+    // then fill remaining slots with QB/TE/K if fewer than 5 RB/WR were available.
+    const draftedFilter = (p: Player) => p.id !== player.id && actuallyDraftedIds.has(p.id);
+    const topRbWr = availableRbWr.filter(draftedFilter).slice(0, 5);
+    const remaining = 5 - topRbWr.length;
+    const topOther = remaining > 0
+      ? available.filter((p) => p.position !== "RB" && p.position !== "WR" && draftedFilter(p)).slice(0, remaining)
+      : [];
+    const boardContext = [...topRbWr, ...topOther].map((p) => ({
+      name: p.name,
+      position: p.position,
+      adpRank: p.adp_rank ?? 999,
+      wasDrafted: true,
+    }));
 
     // ADP fall bonus for QB/TE — how far they fell in the available pool
     const adpFallBonus = (!isRbWr && player.adp_rank != null)
