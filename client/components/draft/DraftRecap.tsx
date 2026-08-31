@@ -50,24 +50,39 @@ const PickRow = memo(function PickRow({ gp }: { gp: GradedPick }) {
         <span className="text-[10px] text-muted-foreground shrink-0 w-12 text-right tabular-nums">
           {player.adp_rank ?? "—"}
         </span>
-        <span className="text-[10px] text-muted-foreground shrink-0 w-12 text-right tabular-nums">
+        <span
+          className="text-[10px] text-muted-foreground shrink-0 w-12 text-right tabular-nums cursor-help"
+          title={`#${overallBpaRank} best player still on the board when this pick was made`}
+        >
           #{overallBpaRank}
         </span>
         <span
           className={cn(
-            "text-[10px] font-mono font-bold shrink-0 w-8 text-right tabular-nums",
+            "text-[10px] font-mono font-bold shrink-0 w-8 text-right tabular-nums cursor-help",
             score > 0 ? "text-green-400" : score < 0 ? "text-red-400" : "text-muted-foreground",
           )}
+          title={score > 0 ? `+${score} — great value pick` : score < 0 ? `${score} — reached for this player` : "0 — picked right at expected value"}
         >
           {score > 0 ? "+" : ""}{score}
         </span>
         <span
           className={cn(
-            "text-[10px] font-mono shrink-0 w-10 text-right tabular-nums",
+            "text-[10px] font-mono shrink-0 w-10 text-right tabular-nums cursor-help",
             player.adp_rank != null
               ? (player.adp_rank - pick.overall_pick) > 0 ? "text-red-400/70" : "text-green-400/70"
               : "text-muted-foreground/40",
           )}
+          title={player.adp_rank != null
+            ? (() => {
+                const d = Math.round(player.adp_rank - pick.overall_pick);
+                return d > 0
+                  ? `Drafted ${d} picks before experts expected — a reach`
+                  : d < 0
+                    ? `Drafted ${Math.abs(d)} picks later than expected — a bargain`
+                    : "Drafted right where experts expected";
+              })()
+            : "No expert ranking available"
+          }
         >
           {player.adp_rank != null
             ? (() => { const d = Math.round(player.adp_rank - pick.overall_pick); return d > 0 ? `+${d}` : `${d}`; })()
@@ -249,9 +264,9 @@ const TeamRecapCard = memo(function TeamRecapCard({
             <span className="w-7 shrink-0" />
             <span className="flex-1 min-w-0">Player</span>
             <span className="shrink-0 w-12 text-right">ADP</span>
-            <span className="shrink-0 w-12 text-right">BPA #</span>
-            <span className="shrink-0 w-8 text-right">Val</span>
-            <span className="shrink-0 w-10 text-right">ADP ±</span>
+            <span className="shrink-0 w-12 text-right cursor-help" title="Best Player Available rank — where this player ranked among all undrafted players at pick time">BPA #</span>
+            <span className="shrink-0 w-8 text-right cursor-help" title="Value score — positive is good (steal), negative is bad (reach)">Val</span>
+            <span className="shrink-0 w-10 text-right cursor-help" title="ADP differential — how many picks earlier or later than experts expected">ADP ±</span>
             <span className="w-4 shrink-0" />
           </div>
           <div className="space-y-0">
