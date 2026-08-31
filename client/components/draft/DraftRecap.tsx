@@ -294,8 +294,11 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
       .sort((a, b) => a.score - b.score)
       .slice(0, 5);
     const perfect = [...allPicks]
-      .filter((p) => p.classification === "right")
-      .sort((a, b) => Math.abs(a.score) - Math.abs(b.score))
+      .filter((p) => p.player.adp_rank != null)
+      .sort((a, b) =>
+        Math.abs((a.player.adp_rank ?? 999) - a.pick.overall_pick) -
+        Math.abs((b.player.adp_rank ?? 999) - b.pick.overall_pick),
+      )
       .slice(0, 5);
     return { steals, reaches, perfect };
   }, [teamGrades]);
