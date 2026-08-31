@@ -118,8 +118,15 @@ export function gradeDraft(
   picks: DraftPick[],
   teams: { id: number; team_name: string; manager_name: string; color: string; is_my_team: boolean; championships: number }[],
 ): { teamGrades: TeamGrade[]; leagueAvg: number } {
-  // Build the draftable pool: all players who are NOT keepers
-  const allDraftable = players.filter((p) => !p.is_keeper);
+  // Build the draftable pool: all players who are NOT keepers AND have ADP data
+  const allDraftable = players.filter((p) => !p.is_keeper && p.adp_rank != null);
+
+  // Build a set of player IDs who were actually drafted — only these are
+  // valid "passed on" candidates. A player nobody picked across 121 slots
+  // is either a ghost record or genuinely unwanted, not a real BPA option.
+  const actuallyDraftedIds = new Set(
+    picks.filter((p) => p.is_complete && p.player_id != null).map((p) => p.player_id!),
+  );
 
   // Sort picks by overall_pick order
   const completedPicks = picks
@@ -155,6 +162,12 @@ export function gradeDraft(
     // Available RB/WR specifically
     const availableRbWr = available.filter((p) => p.position === "RB" || p.position === "WR");
 
+    // For receipts: only include RB/WR who were ACTUALLY drafted later.
+    // This prevents phantom/unwanted players from polluting the "passed on" list.
+    const receiptCandidates = availableRbWr.filter(
+      (p) => p.id !== player.id && actuallyDraftedIds.has(p.id),
+    );
+
     // Where did this player rank in the available pool?
     const overallBpaRank = available.findIndex((p) => p.id === player.id) + 1 || available.length + 1;
 
@@ -174,9 +187,8 @@ export function gradeDraft(
       ? { name: bestRbWr.name, position: bestRbWr.position, adpRank: bestRbWr.adp_rank ?? 999 }
       : null;
 
-    // Top 3 better RB/WR (receipts for reaches)
-    const receipts = availableRbWr
-      .filter((p) => p.id !== player.id)
+    // Top 3 better RB/WR who were actually drafted later (receipts for reaches)
+    const receipts = receiptCandidates
       .slice(0, 3)
       .map((p) => ({ name: p.name, position: p.position, adpRank: p.adp_rank ?? 999 }));
 
