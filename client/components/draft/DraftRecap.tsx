@@ -280,6 +280,26 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
     return map;
   }, [aiData]);
 
+  // Draft superlatives — top 5 steals, reaches, and perfect picks across all teams
+  const superlatives = useMemo(() => {
+    const allPicks = teamGrades.flatMap((tg) =>
+      tg.picks.map((gp) => ({ ...gp, teamName: tg.teamName })),
+    );
+    const steals = [...allPicks]
+      .filter((p) => p.classification === "steal")
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5);
+    const reaches = [...allPicks]
+      .filter((p) => p.classification === "reach" || p.classification === "positional_waste")
+      .sort((a, b) => a.score - b.score)
+      .slice(0, 5);
+    const perfect = [...allPicks]
+      .filter((p) => p.classification === "right")
+      .sort((a, b) => Math.abs(a.score) - Math.abs(b.score))
+      .slice(0, 5);
+    return { steals, reaches, perfect };
+  }, [teamGrades]);
+
   const handleGenerateAI = useCallback(async () => {
     setAiRequested(true);
     try {
@@ -372,6 +392,65 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
             <strong>Grades</strong> are curved 1→{teams.length} — top scorer gets A+, bottom gets F. Scores sum each pick's BPA rating.
           </p>
         </div>
+
+        {/* Draft Superlatives */}
+        {teamGrades.length > 0 && (
+          <div className="grid grid-cols-3 gap-3">
+            {([
+              { title: "🎯 Biggest Steals", items: superlatives.steals, color: "green" },
+              { title: "📉 Biggest Reaches", items: superlatives.reaches, color: "red" },
+              { title: "✅ Perfect Picks", items: superlatives.perfect, color: "blue" },
+            ] as const).map(({ title, items, color }) => (
+              <div
+                key={title}
+                className={cn(
+                  "rounded-lg border p-2.5",
+                  color === "green" && "border-green-500/20 bg-green-500/5",
+                  color === "red" && "border-red-500/20 bg-red-500/5",
+                  color === "blue" && "border-blue-500/20 bg-blue-500/5",
+                )}
+              >
+                <p className={cn(
+                  "text-[10px] uppercase tracking-wider font-bold mb-2",
+                  color === "green" && "text-green-400",
+                  color === "red" && "text-red-400",
+                  color === "blue" && "text-blue-400",
+                )}>
+                  {title}
+                </p>
+                <div className="space-y-1">
+                  {items.map((gp, i) => (
+                    <div key={gp.pick.id} className="space-y-0">
+                      <div className="flex items-center gap-1.5 text-[10px]">
+                        <span className={cn(
+                          "font-bold w-3 text-right",
+                          color === "green" && "text-green-400/60",
+                          color === "red" && "text-red-400/60",
+                          color === "blue" && "text-blue-400/60",
+                        )}>
+                          {i + 1}
+                        </span>
+                        <PositionBadge position={gp.player.position} />
+                        <span className="flex-1 min-w-0 truncate font-medium">{gp.player.name}</span>
+                        <span className={cn(
+                          "font-bold tabular-nums text-[10px]",
+                          color === "green" && "text-green-400",
+                          color === "red" && "text-red-400",
+                          color === "blue" && "text-blue-400",
+                        )}>
+                          {gp.score > 0 ? "+" : ""}{gp.score}
+                        </span>
+                      </div>
+                      <div className="text-[9px] text-muted-foreground/50 ml-[18px]">
+                        Pick {gp.pick.round}.{String(gp.pick.pick_in_round).padStart(2, "0")} · ADP {gp.player.adp_rank ?? "—"} · {gp.teamName}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Team Cards */}
         <div className="space-y-3">
