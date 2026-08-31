@@ -3,7 +3,6 @@ import { useApi } from "@/hooks/useApi";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import PositionBadge from "./PositionBadge";
 import { cn } from "@/lib/utils";
 import { getTeamEmoji, type Player, type Team, type DraftPick } from "@/lib/draft-constants";
@@ -27,54 +26,75 @@ type DraftRecapProps = {
 
 // ─── Pick Row ───────────────────────────────────────────────
 const PickRow = memo(function PickRow({ gp }: { gp: GradedPick }) {
-  const { player, pick, classification, score, receipts, rbWrBpaRank, overallBpaRank, adpFallBonus } = gp;
+  const { player, pick, classification, score, boardContext, overallBpaRank, adpFallBonus } = gp;
+  const [open, setOpen] = useState(false);
 
   return (
-    <div className="flex items-center gap-1.5 text-[11px] py-[3px] hover:bg-white/[0.02] rounded-sm">
-      <span className="text-muted-foreground font-mono w-8 text-right shrink-0">
-        {pick.round}.{String(pick.pick_in_round).padStart(2, "0")}
-      </span>
-      <span className="w-4 text-center shrink-0" title={classificationLabel(classification)}>
-        {classificationEmoji(classification)}
-      </span>
-      <span className="w-7 shrink-0"><PositionBadge position={player.position} /></span>
-      <span className="flex-1 min-w-0 truncate">{player.name}</span>
-      <span className="text-[10px] text-muted-foreground shrink-0 w-12 text-right tabular-nums">
-        {player.adp_rank ?? "—"}
-      </span>
-      <span className="text-[10px] text-muted-foreground shrink-0 w-12 text-right tabular-nums">
-        #{overallBpaRank}
-      </span>
-      <span
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
         className={cn(
-          "text-[10px] font-mono font-bold shrink-0 w-8 text-right tabular-nums",
-          score > 0 ? "text-green-400" : score < 0 ? "text-red-400" : "text-muted-foreground",
+          "flex items-center gap-1.5 text-[11px] py-[3px] w-full text-left rounded-sm transition-colors cursor-pointer",
+          open ? "bg-white/[0.04]" : "hover:bg-white/[0.02]",
         )}
       >
-        {score > 0 ? "+" : ""}{score}
-      </span>
-      {/* Reach receipts */}
-      {classification === "reach" && receipts.length > 0 && (
-        <TooltipProvider delayDuration={200}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="text-red-400/70 cursor-help text-[9px] ml-0.5 shrink-0">📋</span>
-            </TooltipTrigger>
-            <TooltipContent side="left" className="max-w-60">
-              <p className="text-[10px] font-semibold mb-1">Better RB/WR available:</p>
-              {receipts.map((r, i) => (
-                <p key={i} className="text-[10px]">
-                  {i + 1}. {r.name} ({r.position}) — ADP {r.adpRank}
-                </p>
-              ))}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <span className="text-muted-foreground font-mono w-8 text-right shrink-0">
+          {pick.round}.{String(pick.pick_in_round).padStart(2, "0")}
+        </span>
+        <span className="w-4 text-center shrink-0" title={classificationLabel(classification)}>
+          {classificationEmoji(classification)}
+        </span>
+        <span className="w-7 shrink-0"><PositionBadge position={player.position} /></span>
+        <span className="flex-1 min-w-0 truncate">{player.name}</span>
+        <span className="text-[10px] text-muted-foreground shrink-0 w-12 text-right tabular-nums">
+          {player.adp_rank ?? "—"}
+        </span>
+        <span className="text-[10px] text-muted-foreground shrink-0 w-12 text-right tabular-nums">
+          #{overallBpaRank}
+        </span>
+        <span
+          className={cn(
+            "text-[10px] font-mono font-bold shrink-0 w-8 text-right tabular-nums",
+            score > 0 ? "text-green-400" : score < 0 ? "text-red-400" : "text-muted-foreground",
+          )}
+        >
+          {score > 0 ? "+" : ""}{score}
+        </span>
+        <Icon
+          icon={open ? "chevron-up" : "chevron-down"}
+          className="h-3 w-3 text-muted-foreground/40 shrink-0"
+        />
+      </button>
+
+      {/* Board context dropdown */}
+      {open && boardContext.length > 0 && (
+        <div className="ml-[52px] mr-6 mb-1.5 mt-0.5 rounded border border-border/40 bg-black/20 px-2.5 py-1.5">
+          <p className="text-[9px] uppercase tracking-wider text-muted-foreground/60 font-semibold mb-1">
+            Best available on the board at this pick
+          </p>
+          {boardContext.map((alt, i) => (
+            <div
+              key={i}
+              className="flex items-center gap-1.5 text-[10px] py-[2px]"
+            >
+              <span className="text-muted-foreground/50 w-4 text-right font-mono">{i + 1}.</span>
+              <PositionBadge position={alt.position} />
+              <span className="flex-1 min-w-0 truncate text-muted-foreground">
+                {alt.name}
+              </span>
+              <span className="text-[9px] text-muted-foreground/60 tabular-nums">
+                ADP {alt.adpRank}
+              </span>
+            </div>
+          ))}
+        </div>
       )}
+
       {/* QB/TE fall bonus indicator */}
-      {adpFallBonus >= 40 && (
-        <span className="text-green-400/70 text-[9px] ml-0.5 shrink-0" title={`Fell ${adpFallBonus} spots in available pool`}>
-          ⬇️
+      {adpFallBonus >= 40 && !open && (
+        <span className="text-green-400/70 text-[9px] ml-[52px]" title={`Fell ${adpFallBonus} spots in available pool`}>
+          ⬇️ Fell {adpFallBonus} spots — value grab
         </span>
       )}
     </div>

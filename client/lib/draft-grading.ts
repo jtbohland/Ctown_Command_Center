@@ -26,6 +26,8 @@ export type GradedPick = {
   score: number;
   /** Top 3 better RB/WR that were available (for reaches) */
   receipts: { name: string; position: string; adpRank: number }[];
+  /** Top 5 best available players at this pick (all positions, actually drafted only) */
+  boardContext: { name: string; position: string; adpRank: number; wasDrafted: boolean }[];
   /** Best available RB/WR at this pick */
   bestAvailableRbWr: { name: string; position: string; adpRank: number } | null;
   /** How far the player fell in available pool vs ADP (for QB/TE bonus) */
@@ -192,6 +194,18 @@ export function gradeDraft(
       .slice(0, 3)
       .map((p) => ({ name: p.name, position: p.position, adpRank: p.adp_rank ?? 999 }));
 
+    // Top 5 best available players across ALL positions (for board context dropdown)
+    // Only include players who were actually drafted later in the draft
+    const boardContext = available
+      .filter((p) => p.id !== player.id && actuallyDraftedIds.has(p.id))
+      .slice(0, 5)
+      .map((p) => ({
+        name: p.name,
+        position: p.position,
+        adpRank: p.adp_rank ?? 999,
+        wasDrafted: true,
+      }));
+
     // ADP fall bonus for QB/TE — how far they fell in the available pool
     const adpFallBonus = (!isRbWr && player.adp_rank != null)
       ? Math.max(0, overallBpaRank - 1) // if ranked #5 in pool but ADP says they should be gone
@@ -265,6 +279,7 @@ export function gradeDraft(
       classification,
       score,
       receipts: classification === "reach" ? receipts : [],
+      boardContext,
       bestAvailableRbWr,
       adpFallBonus,
       isPositionalWaste,
