@@ -287,22 +287,40 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
     );
     // ADP differential: positive = drafted later than ADP (fell = great value)
     const adpDiff = (gp: (typeof allPicks)[0]) => (gp.player.adp_rank ?? 999) - gp.pick.overall_pick;
+    const isRbWr = (gp: (typeof allPicks)[0]) => gp.player.position === "RB" || gp.player.position === "WR";
+    const isQbTe = (gp: (typeof allPicks)[0]) => gp.player.position === "QB" || gp.player.position === "TE";
+    const hasAdp = (gp: (typeof allPicks)[0]) => gp.player.adp_rank != null;
+
+    // Main 3 tiles — RB/WR only
     const steals = [...allPicks]
-      .filter((p) => p.classification === "steal" && p.player.adp_rank != null)
+      .filter((p) => p.classification === "steal" && isRbWr(p) && hasAdp(p))
       .sort((a, b) => adpDiff(b) - adpDiff(a))
       .slice(0, 5);
     const reaches = [...allPicks]
-      .filter((p) => (p.classification === "reach" || p.classification === "positional_waste") && p.player.adp_rank != null)
+      .filter((p) => (p.classification === "reach") && isRbWr(p) && hasAdp(p))
       .sort((a, b) => adpDiff(a) - adpDiff(b))
       .slice(0, 5);
     const perfect = [...allPicks]
-      .filter((p) => p.player.adp_rank != null)
+      .filter((p) => isRbWr(p) && hasAdp(p))
       .sort((a, b) =>
         Math.abs((a.player.adp_rank ?? 999) - a.pick.overall_pick) -
         Math.abs((b.player.adp_rank ?? 999) - b.pick.overall_pick),
       )
       .slice(0, 5);
-    return { steals, reaches, perfect };
+
+    // QB/TE corner — notable moments
+    const qbTePicks = allPicks.filter((p) => isQbTe(p) && hasAdp(p));
+    const qbTeBestFall = [...qbTePicks].sort((a, b) => adpDiff(b) - adpDiff(a))[0] ?? null;
+    const qbTeWorstWaste = [...qbTePicks]
+      .filter((p) => p.classification === "positional_waste")
+      .sort((a, b) => a.score - b.score)[0] ?? null;
+    const qbTePerfect = [...qbTePicks]
+      .sort((a, b) =>
+        Math.abs((a.player.adp_rank ?? 999) - a.pick.overall_pick) -
+        Math.abs((b.player.adp_rank ?? 999) - b.pick.overall_pick),
+      )[0] ?? null;
+
+    return { steals, reaches, perfect, qbTe: { bestFall: qbTeBestFall, worstWaste: qbTeWorstWaste, perfect: qbTePerfect } };
   }, [teamGrades]);
 
   const handleGenerateAI = useCallback(async () => {
@@ -400,7 +418,7 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
 
         {/* Draft Superlatives */}
         {teamGrades.length > 0 && (
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-4 gap-3">
             {([
               { title: "🎯 Biggest Steals", items: superlatives.steals, color: "green" },
               { title: "📉 Biggest Reaches", items: superlatives.reaches, color: "red" },
@@ -454,6 +472,51 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
                 </div>
               </div>
             ))}
+
+            {/* QB/TE Corner */}
+            <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-2.5">
+              <p className="text-[10px] uppercase tracking-wider font-bold mb-2 text-purple-400">
+                🧊 QB/TE Corner
+              </p>
+              <div className="space-y-2">
+                {superlatives.qbTe.bestFall && (
+                  <div>
+                    <p className="text-[9px] uppercase tracking-wider text-purple-400/60 font-semibold">Best Value</p>
+                    <div className="flex items-center gap-1.5 text-[10px]">
+                      <PositionBadge position={superlatives.qbTe.bestFall.player.position} />
+                      <span className="font-medium truncate">{superlatives.qbTe.bestFall.player.name}</span>
+                    </div>
+                    <p className="text-[9px] text-muted-foreground/50">
+                      Pick {superlatives.qbTe.bestFall.pick.round}.{String(superlatives.qbTe.bestFall.pick.pick_in_round).padStart(2, "0")} · ADP {superlatives.qbTe.bestFall.player.adp_rank ?? "—"} · {superlatives.qbTe.bestFall.teamName}
+                    </p>
+                  </div>
+                )}
+                {superlatives.qbTe.worstWaste && (
+                  <div>
+                    <p className="text-[9px] uppercase tracking-wider text-purple-400/60 font-semibold">Worst Waste</p>
+                    <div className="flex items-center gap-1.5 text-[10px]">
+                      <PositionBadge position={superlatives.qbTe.worstWaste.player.position} />
+                      <span className="font-medium truncate">{superlatives.qbTe.worstWaste.player.name}</span>
+                    </div>
+                    <p className="text-[9px] text-muted-foreground/50">
+                      Pick {superlatives.qbTe.worstWaste.pick.round}.{String(superlatives.qbTe.worstWaste.pick.pick_in_round).padStart(2, "0")} · ADP {superlatives.qbTe.worstWaste.player.adp_rank ?? "—"} · {superlatives.qbTe.worstWaste.teamName}
+                    </p>
+                  </div>
+                )}
+                {superlatives.qbTe.perfect && (
+                  <div>
+                    <p className="text-[9px] uppercase tracking-wider text-purple-400/60 font-semibold">Perfect Timing</p>
+                    <div className="flex items-center gap-1.5 text-[10px]">
+                      <PositionBadge position={superlatives.qbTe.perfect.player.position} />
+                      <span className="font-medium truncate">{superlatives.qbTe.perfect.player.name}</span>
+                    </div>
+                    <p className="text-[9px] text-muted-foreground/50">
+                      Pick {superlatives.qbTe.perfect.pick.round}.{String(superlatives.qbTe.perfect.pick.pick_in_round).padStart(2, "0")} · ADP {superlatives.qbTe.perfect.player.adp_rank ?? "—"} · {superlatives.qbTe.perfect.teamName}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
