@@ -285,7 +285,9 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
     const allPicks = teamGrades.flatMap((tg) =>
       tg.picks.map((gp) => ({ ...gp, teamName: tg.teamName })),
     );
-    // ADP differential: positive = drafted later than ADP (fell = great value)
+    // ADP differential: positive = ADP higher than pick slot (drafted before ADP)
+    // For steals: players who fell the most (picked later than ADP) → most NEGATIVE diff
+    // For reaches: players drafted earliest vs ADP → most POSITIVE diff
     const adpDiff = (gp: (typeof allPicks)[0]) => (gp.player.adp_rank ?? 999) - gp.pick.overall_pick;
     const isRbWr = (gp: (typeof allPicks)[0]) => gp.player.position === "RB" || gp.player.position === "WR";
     const isQbTe = (gp: (typeof allPicks)[0]) => gp.player.position === "QB" || gp.player.position === "TE";
@@ -298,7 +300,7 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
       .slice(0, 5);
     const reaches = [...allPicks]
       .filter((p) => (p.classification === "reach") && isRbWr(p) && hasAdp(p))
-      .sort((a, b) => adpDiff(a) - adpDiff(b))
+      .sort((a, b) => adpDiff(b) - adpDiff(a))
       .slice(0, 5);
     const perfect = [...allPicks]
       .filter((p) => isRbWr(p) && hasAdp(p))
@@ -418,6 +420,7 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
 
         {/* Draft Superlatives */}
         {teamGrades.length > 0 && (
+          <>
           <div className="grid grid-cols-4 gap-3">
             {([
               { title: "🎯 Biggest Steals", items: superlatives.steals, color: "green" },
@@ -461,7 +464,12 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
                           color === "red" && "text-red-400",
                           color === "blue" && "text-blue-400",
                         )}>
-                          {gp.score > 0 ? "+" : ""}{gp.score}
+                          {(() => {
+                            const diff = Math.round((gp.player.adp_rank ?? 0) - gp.pick.overall_pick);
+                            if (color === "blue") return `±${Math.abs(diff)}`;
+                            if (color === "green") { const fall = -diff; return fall > 0 ? `+${fall}` : `${fall}`; }
+                            return diff > 0 ? `+${diff}` : `${diff}`;
+                          })()}
                         </span>
                       </div>
                       <div className="text-[9px] text-muted-foreground/50 ml-[18px]">
@@ -518,6 +526,10 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
               </div>
             </div>
           </div>
+          <p className="text-[9px] text-muted-foreground/40 mt-1.5 text-center">
+            Numbers show ADP vs. pick slot — Steals fell past their ADP (great value). Reaches were drafted before their ADP. Perfect Picks had the closest ADP-to-slot match.
+          </p>
+          </>
         )}
 
         {/* Team Cards */}
