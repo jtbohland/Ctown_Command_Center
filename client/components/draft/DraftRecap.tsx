@@ -30,20 +30,20 @@ const PickRow = memo(function PickRow({ gp }: { gp: GradedPick }) {
   const { player, pick, classification, score, receipts, rbWrBpaRank, overallBpaRank, adpFallBonus } = gp;
 
   return (
-    <div className="flex items-start gap-1.5 text-[11px] py-0.5">
+    <div className="flex items-center gap-1.5 text-[11px] py-[3px] hover:bg-white/[0.02] rounded-sm">
       <span className="text-muted-foreground font-mono w-8 text-right shrink-0">
         {pick.round}.{String(pick.pick_in_round).padStart(2, "0")}
       </span>
       <span className="w-4 text-center shrink-0" title={classificationLabel(classification)}>
         {classificationEmoji(classification)}
       </span>
-      <PositionBadge position={player.position} />
+      <span className="w-7 shrink-0"><PositionBadge position={player.position} /></span>
       <span className="flex-1 min-w-0 truncate">{player.name}</span>
-      <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
-        ADP {player.adp_rank ?? "—"}
+      <span className="text-[10px] text-muted-foreground shrink-0 w-12 text-right tabular-nums">
+        {player.adp_rank ?? "—"}
       </span>
-      <span className="text-[10px] text-muted-foreground shrink-0 w-10 text-right tabular-nums">
-        BPA #{overallBpaRank}
+      <span className="text-[10px] text-muted-foreground shrink-0 w-12 text-right tabular-nums">
+        #{overallBpaRank}
       </span>
       <span
         className={cn(
@@ -209,10 +209,23 @@ const TeamRecapCard = memo(function TeamRecapCard({
       </button>
 
       {expanded && (
-        <div className="space-y-0.5 pt-1 border-t border-border/50">
-          {tg.picks.map((gp) => (
-            <PickRow key={gp.pick.id} gp={gp} />
-          ))}
+        <div className="pt-1 border-t border-border/50">
+          {/* Column headers */}
+          <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground/60 uppercase tracking-wider font-semibold pb-1 mb-0.5 border-b border-border/30">
+            <span className="w-8 text-right shrink-0">Pick</span>
+            <span className="w-4 shrink-0" />
+            <span className="w-7 shrink-0" />
+            <span className="flex-1 min-w-0">Player</span>
+            <span className="shrink-0 w-12 text-right">ADP</span>
+            <span className="shrink-0 w-12 text-right">BPA #</span>
+            <span className="shrink-0 w-8 text-right">Val</span>
+            <span className="w-4 shrink-0" />
+          </div>
+          <div className="space-y-0">
+            {tg.picks.map((gp) => (
+              <PickRow key={gp.pick.id} gp={gp} />
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -321,9 +334,9 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
 
         {/* Legend */}
         <div className="rounded-lg border border-border/50 bg-card/50 p-3 text-[11px] text-muted-foreground space-y-1.5">
-          <p className="font-semibold text-foreground text-xs">How Board-Aware BPA Grading Works</p>
+          <p className="font-semibold text-foreground text-xs">How Board-Aware BPA (Best Player Available) Grading Works</p>
           <p>
-            For every pick, we simulate who was still on the board at that moment — <strong>keepers are excluded</strong> from the pool
+            <strong>BPA = Best Player Available.</strong> For every pick, we simulate who was still on the board at that moment — <strong>keepers are excluded</strong> from the pool
             (they were never available). Then we rank the pick against the best remaining players.
           </p>
           <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
