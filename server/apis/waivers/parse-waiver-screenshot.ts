@@ -135,7 +135,7 @@ Return ONLY the JSON array — no markdown, no explanation.`;
     const result = await ctx.integrations.gemini.apiRequest(
       {
         method: "POST",
-        path: "/v1beta/models/gemini-2.0-flash:generateContent",
+        path: "/v1beta/models/gemini-3.6-flash:generateContent",
         body: {
           contents: [
             {

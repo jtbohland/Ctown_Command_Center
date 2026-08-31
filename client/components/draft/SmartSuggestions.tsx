@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef, useEffect, memo } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect, memo, type CSSProperties } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Icon } from "@/components/ui/icon";
@@ -732,12 +732,14 @@ export default function SmartSuggestions({ players, myTeam, isMyPick, currentOve
       .slice(0, 8);
   }, [viewMode, debouncedSearch, allScored, suggestions]);
 
+  const [collapsed, setCollapsed] = useState(false);
+
   if (!isMyPick || allScored.length === 0) return null;
 
   return (
-    <div className="px-4 py-3 border-b border-primary/20 bg-gradient-to-r from-primary/5 via-transparent to-primary/5">
-      {/* Header row */}
-      <div className="flex items-center gap-2 mb-2.5">
+    <div className="border-b border-primary/20 bg-gradient-to-r from-primary/5 via-transparent to-primary/5 shrink-0">
+      {/* Header row — always visible */}
+      <div className="flex items-center gap-2 px-4 py-2">
         <Icon icon="sparkles" className="h-4 w-4 text-primary" />
         <h3 className="text-xs font-bold uppercase tracking-wider text-primary">
           Smart Pick Suggestions
@@ -748,6 +750,13 @@ export default function SmartSuggestions({ players, myTeam, isMyPick, currentOve
         <span className="text-[9px] text-muted-foreground/60 ml-1">
           55 expert · 25 fit · 8 keeper · 10 tags · 5 tiebreak
         </span>
+        <button
+          onClick={() => setCollapsed((c) => !c)}
+          className="ml-1 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+          title={collapsed ? "Expand suggestions" : "Collapse suggestions"}
+        >
+          <Icon icon={collapsed ? "chevron-down" : "chevron-up"} className="h-3.5 w-3.5" />
+        </button>
 
         {/* Rival Scout pills — next 3 pickers' RB/WR needs */}
         {rivals.length > 0 && (
@@ -774,8 +783,8 @@ export default function SmartSuggestions({ players, myTeam, isMyPick, currentOve
           </div>
         )}
 
-        {/* View Mode toggle */}
-        <div className="flex items-center gap-1 bg-secondary/40 rounded-md p-0.5 ml-auto">
+        {/* View Mode toggle (hidden when collapsed) */}
+        {!collapsed && <div className="flex items-center gap-1 bg-secondary/40 rounded-md p-0.5 ml-auto">
           <button
             onClick={() => { setViewMode("smart"); setAllPage(0); }}
             className={`px-2.5 py-1 rounded text-[10px] font-semibold transition-colors cursor-pointer ${
@@ -798,8 +807,12 @@ export default function SmartSuggestions({ players, myTeam, isMyPick, currentOve
             <Icon icon="list" className="h-3 w-3 inline mr-1" />
             All Players ({allScored.length})
           </button>
-        </div>
+        </div>}
       </div>
+
+      {/* Collapsible body — capped at 50vh */}
+      {!collapsed && (
+      <div className="overflow-y-auto px-4 pb-3" style={{ maxHeight: "50vh" } as CSSProperties}>
 
       {/* ─── SMART PICKS VIEW ─── */}
       {viewMode === "smart" && (
@@ -981,6 +994,8 @@ export default function SmartSuggestions({ players, myTeam, isMyPick, currentOve
             </div>
           )}
         </>
+      )}
+      </div>
       )}
     </div>
   );

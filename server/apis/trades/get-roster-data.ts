@@ -58,21 +58,26 @@ export default api({
     let rosterPlayers: z.infer<typeof RosterPlayerSchema>[] = [];
 
     if (colExists) {
-      // Fetch all players with roster assignments
+      // Fetch all players with roster OR draft assignments (COALESCE ensures
+      // drafted players show even if roster_team_id wasn't synced)
       rosterPlayers = await ctx.integrations.apps_db.query(
         `SELECT p.id, p.name, p.position, p.nfl_team, p.adp_rank,
-                p.positional_rank, p.roster_team_id, p.is_keeper,
-                t.team_name, t.manager_name
+                p.positional_rank,
+                COALESCE(p.roster_team_id, p.drafted_team_id) AS roster_team_id,
+                p.is_keeper,
+                COALESCE(rt.team_name, dt.team_name) AS team_name,
+                COALESCE(rt.manager_name, dt.manager_name) AS manager_name
          FROM ffwr_players p
-         LEFT JOIN ffwr_teams t ON t.id = p.roster_team_id
-         WHERE p.roster_team_id IS NOT NULL
-         ORDER BY t.manager_name, 
+         LEFT JOIN ffwr_teams rt ON rt.id = p.roster_team_id
+         LEFT JOIN ffwr_teams dt ON dt.id = p.drafted_team_id
+         WHERE p.roster_team_id IS NOT NULL OR p.drafted_team_id IS NOT NULL
+         ORDER BY COALESCE(rt.manager_name, dt.manager_name),
            CASE p.position WHEN 'QB' THEN 1 WHEN 'RB' THEN 2 WHEN 'WR' THEN 3 WHEN 'TE' THEN 4 ELSE 5 END,
            p.adp_rank ASC NULLS LAST
          LIMIT 500`,
         RosterPlayerSchema,
         undefined,
-        { label: "Fetch all rostered players" }
+        { label: "Fetch all rostered + drafted players" }
       );
     }
 
