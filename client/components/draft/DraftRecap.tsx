@@ -51,14 +51,14 @@ const PickRow = memo(function PickRow({ gp }: { gp: GradedPick }) {
           {player.adp_rank ?? "—"}
         </span>
         <span
-          className="text-[10px] text-muted-foreground shrink-0 w-12 text-right tabular-nums cursor-help"
+          className="text-[10px] text-muted-foreground shrink-0 w-12 text-right tabular-nums"
           title={`#${overallBpaRank} best player still on the board when this pick was made`}
         >
           #{overallBpaRank}
         </span>
         <span
           className={cn(
-            "text-[10px] font-mono font-bold shrink-0 w-8 text-right tabular-nums cursor-help",
+            "text-[10px] font-mono font-bold shrink-0 w-8 text-right tabular-nums",
             score > 0 ? "text-green-400" : score < 0 ? "text-red-400" : "text-muted-foreground",
           )}
           title={score > 0 ? `+${score} — great value pick` : score < 0 ? `${score} — reached for this player` : "0 — picked right at expected value"}
@@ -67,7 +67,7 @@ const PickRow = memo(function PickRow({ gp }: { gp: GradedPick }) {
         </span>
         <span
           className={cn(
-            "text-[10px] font-mono shrink-0 w-10 text-right tabular-nums cursor-help",
+            "text-[10px] font-mono shrink-0 w-10 text-right tabular-nums",
             player.adp_rank != null
               ? (player.adp_rank - pick.overall_pick) > 0 ? "text-red-400/70" : "text-green-400/70"
               : "text-muted-foreground/40",
@@ -264,9 +264,9 @@ const TeamRecapCard = memo(function TeamRecapCard({
             <span className="w-7 shrink-0" />
             <span className="flex-1 min-w-0">Player</span>
             <span className="shrink-0 w-12 text-right">ADP</span>
-            <span className="shrink-0 w-12 text-right cursor-help" title="Best Player Available rank — where this player ranked among all undrafted players at pick time">BPA #</span>
-            <span className="shrink-0 w-8 text-right cursor-help" title="Value score — positive is good (steal), negative is bad (reach)">Val</span>
-            <span className="shrink-0 w-10 text-right cursor-help" title="ADP differential — how many picks earlier or later than experts expected">ADP ±</span>
+            <span className="shrink-0 w-12 text-right" title="Best Player Available rank — where this player ranked among all undrafted players at pick time">BPA #</span>
+            <span className="shrink-0 w-8 text-right" title="Value score — positive is good (steal), negative is bad (reach)">Val</span>
+            <span className="shrink-0 w-10 text-right" title="ADP differential — how many picks earlier or later than experts expected">ADP ±</span>
             <span className="w-4 shrink-0" />
           </div>
           <div className="space-y-0">
