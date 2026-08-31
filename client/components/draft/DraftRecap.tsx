@@ -61,6 +61,18 @@ const PickRow = memo(function PickRow({ gp }: { gp: GradedPick }) {
         >
           {score > 0 ? "+" : ""}{score}
         </span>
+        <span
+          className={cn(
+            "text-[10px] font-mono shrink-0 w-10 text-right tabular-nums",
+            player.adp_rank != null
+              ? (player.adp_rank - pick.overall_pick) > 0 ? "text-red-400/70" : "text-green-400/70"
+              : "text-muted-foreground/40",
+          )}
+        >
+          {player.adp_rank != null
+            ? (() => { const d = Math.round(player.adp_rank - pick.overall_pick); return d > 0 ? `+${d}` : `${d}`; })()
+            : "—"}
+        </span>
         <Icon
           icon={open ? "chevron-up" : "chevron-down"}
           className="h-3 w-3 text-muted-foreground/40 shrink-0"
@@ -239,6 +251,7 @@ const TeamRecapCard = memo(function TeamRecapCard({
             <span className="shrink-0 w-12 text-right">ADP</span>
             <span className="shrink-0 w-12 text-right">BPA #</span>
             <span className="shrink-0 w-8 text-right">Val</span>
+            <span className="shrink-0 w-10 text-right">ADP ±</span>
             <span className="w-4 shrink-0" />
           </div>
           <div className="space-y-0">

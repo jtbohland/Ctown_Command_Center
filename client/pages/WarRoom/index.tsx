@@ -452,7 +452,7 @@ export default function WarRoom() {
       />
 
       {/* Draft Complete Celebration */}
-      <DraftCelebration isDraftComplete={isDraftComplete} />
+      <DraftCelebration isDraftComplete={isDraftComplete} onGoToRecap={() => setMainView("recap")} />
     </div>
   );
 }
