@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, memo } from "react";
+import { useState, useEffect, useCallback, memo } from "react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
@@ -28,28 +28,36 @@ const confettiPieces = Array.from({ length: CONFETTI_COUNT }, (_, i) => ({
   left: Math.random() * 100,
 }));
 
+// localStorage key includes draft year so future drafts get a fresh modal
+const DISMISS_KEY = "ctown-draft-celebration-dismissed-2026";
+
 // ─── Celebration Modal ──────────────────────────────────────
 type DraftCelebrationProps = {
   isDraftComplete: boolean;
+  onGoToRecap?: () => void;
 };
 
-const DraftCelebration = memo(function DraftCelebration({ isDraftComplete }: DraftCelebrationProps) {
-  const [dismissed, setDismissed] = useState(false);
-  const [hasTriggered, setHasTriggered] = useState(false);
+const DraftCelebration = memo(function DraftCelebration({ isDraftComplete, onGoToRecap }: DraftCelebrationProps) {
+  const [dismissed, setDismissed] = useState(() => {
+    try { return localStorage.getItem(DISMISS_KEY) === "true"; } catch { return false; }
+  });
 
-  // Only trigger once when draft transitions to complete
-  useEffect(() => {
-    if (isDraftComplete && !hasTriggered) {
-      setHasTriggered(true);
-    }
-  }, [isDraftComplete, hasTriggered]);
+  const dismiss = useCallback(() => {
+    setDismissed(true);
+    try { localStorage.setItem(DISMISS_KEY, "true"); } catch { /* noop */ }
+  }, []);
 
-  const open = hasTriggered && !dismissed;
+  const handleRecap = useCallback(() => {
+    dismiss();
+    onGoToRecap?.();
+  }, [dismiss, onGoToRecap]);
+
+  const open = isDraftComplete && !dismissed;
 
   if (!open) return null;
 
   return (
-    <Dialog open={open} onOpenChange={(val) => !val && setDismissed(true)}>
+    <Dialog open={open} onOpenChange={(val) => { if (!val) dismiss(); }}>
       <DialogContent className="sm:max-w-md border-amber-500/30 bg-gradient-to-b from-card to-card/95 overflow-hidden">
         {/* Confetti container */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -72,9 +80,16 @@ const DraftCelebration = memo(function DraftCelebration({ isDraftComplete }: Dra
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setDismissed(true)}
+              onClick={dismiss}
             >
               Close
+            </Button>
+            <Button
+              size="sm"
+              className="bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600"
+              onClick={handleRecap}
+            >
+              Redux Recap
             </Button>
           </div>
         </div>
