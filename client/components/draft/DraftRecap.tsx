@@ -3,9 +3,20 @@ import { useApi } from "@/hooks/useApi";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import PositionBadge from "./PositionBadge";
 import { cn } from "@/lib/utils";
 import { getTeamEmoji, type Player, type Team, type DraftPick } from "@/lib/draft-constants";
+import {
+  gradeDraft,
+  gradeColor,
+  gradeBg,
+  rankMedal,
+  classificationEmoji,
+  classificationLabel,
+  type TeamGrade,
+  type GradedPick,
+} from "@/lib/draft-grading";
 
 // ─── Types ──────────────────────────────────────────────────
 type DraftRecapProps = {
@@ -14,58 +25,61 @@ type DraftRecapProps = {
   picks: DraftPick[];
 };
 
-type TeamGrade = {
-  team: Team;
-  rank: number;
-  picks: { player: Player; pick: DraftPick; value: number }[];
-  totalValue: number;
-  avgValue: number;
-  stealCount: number;
-  reachCount: number;
-  bestSteal: { player: Player; value: number; pick: DraftPick } | null;
-  biggestReach: { player: Player; value: number; pick: DraftPick } | null;
-  posCounts: Record<string, number>;
-  grade: string;
-};
+// ─── Pick Row ───────────────────────────────────────────────
+const PickRow = memo(function PickRow({ gp }: { gp: GradedPick }) {
+  const { player, pick, classification, score, receipts, rbWrBpaRank, overallBpaRank, adpFallBonus } = gp;
 
-// ─── Relative Grading ───────────────────────────────────────
-// Grades are rank-based: assigned relative to the field of 11 teams.
-function gradeFromRank(rank: number, total: number): string {
-  const pct = (rank - 1) / Math.max(total - 1, 1); // 0 = best, 1 = worst
-  if (pct <= 0.09) return "A+";
-  if (pct <= 0.18) return "A";
-  if (pct <= 0.27) return "A-";
-  if (pct <= 0.36) return "B+";
-  if (pct <= 0.50) return "B";
-  if (pct <= 0.63) return "B-";
-  if (pct <= 0.72) return "C+";
-  if (pct <= 0.81) return "C";
-  if (pct <= 0.90) return "D";
-  return "F";
-}
-
-function gradeColor(grade: string): string {
-  if (grade.startsWith("A")) return "text-green-400";
-  if (grade.startsWith("B")) return "text-blue-400";
-  if (grade.startsWith("C")) return "text-amber-400";
-  if (grade === "D") return "text-orange-400";
-  return "text-red-400";
-}
-
-function gradeBg(grade: string): string {
-  if (grade.startsWith("A")) return "bg-green-500/10 border-green-500/20";
-  if (grade.startsWith("B")) return "bg-blue-500/10 border-blue-500/20";
-  if (grade.startsWith("C")) return "bg-amber-500/10 border-amber-500/20";
-  if (grade === "D") return "bg-orange-500/10 border-orange-500/20";
-  return "bg-red-500/10 border-red-500/20";
-}
-
-function rankMedal(rank: number): string {
-  if (rank === 1) return "🥇";
-  if (rank === 2) return "🥈";
-  if (rank === 3) return "🥉";
-  return `#${rank}`;
-}
+  return (
+    <div className="flex items-start gap-1.5 text-[11px] py-0.5">
+      <span className="text-muted-foreground font-mono w-8 text-right shrink-0">
+        {pick.round}.{String(pick.pick_in_round).padStart(2, "0")}
+      </span>
+      <span className="w-4 text-center shrink-0" title={classificationLabel(classification)}>
+        {classificationEmoji(classification)}
+      </span>
+      <PositionBadge position={player.position} />
+      <span className="flex-1 min-w-0 truncate">{player.name}</span>
+      <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
+        ADP {player.adp_rank ?? "—"}
+      </span>
+      <span className="text-[10px] text-muted-foreground shrink-0 w-10 text-right tabular-nums">
+        BPA #{overallBpaRank}
+      </span>
+      <span
+        className={cn(
+          "text-[10px] font-mono font-bold shrink-0 w-8 text-right tabular-nums",
+          score > 0 ? "text-green-400" : score < 0 ? "text-red-400" : "text-muted-foreground",
+        )}
+      >
+        {score > 0 ? "+" : ""}{score}
+      </span>
+      {/* Reach receipts */}
+      {classification === "reach" && receipts.length > 0 && (
+        <TooltipProvider delayDuration={200}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="text-red-400/70 cursor-help text-[9px] ml-0.5 shrink-0">📋</span>
+            </TooltipTrigger>
+            <TooltipContent side="left" className="max-w-60">
+              <p className="text-[10px] font-semibold mb-1">Better RB/WR available:</p>
+              {receipts.map((r, i) => (
+                <p key={i} className="text-[10px]">
+                  {i + 1}. {r.name} ({r.position}) — ADP {r.adpRank}
+                </p>
+              ))}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
+      {/* QB/TE fall bonus indicator */}
+      {adpFallBonus >= 40 && (
+        <span className="text-green-400/70 text-[9px] ml-0.5 shrink-0" title={`Fell ${adpFallBonus} spots in available pool`}>
+          ⬇️
+        </span>
+      )}
+    </div>
+  );
+});
 
 // ─── Team Card ──────────────────────────────────────────────
 const TeamRecapCard = memo(function TeamRecapCard({
@@ -88,14 +102,14 @@ const TeamRecapCard = memo(function TeamRecapCard({
         </span>
         <span
           className="w-3 h-3 rounded-full ring-1 ring-white/10 shrink-0"
-          style={{ backgroundColor: tg.team.color }}
+          style={{ backgroundColor: tg.color }}
         />
         <div className="flex-1 min-w-0">
           <span className="text-sm font-semibold truncate block">
-            {getTeamEmoji(tg.team.team_name)} {tg.team.team_name}
-            {tg.team.is_my_team && <span className="text-primary ml-1 text-[10px]">(YOU)</span>}
+            {getTeamEmoji(tg.teamName)} {tg.teamName}
+            {tg.isMyTeam && <span className="text-primary ml-1 text-[10px]">(YOU)</span>}
           </span>
-          <span className="text-[10px] text-muted-foreground">{tg.team.manager_name}</span>
+          <span className="text-[10px] text-muted-foreground">{tg.managerName}</span>
         </div>
         <span className={cn("text-2xl font-black", gradeColor(tg.grade))}>
           {tg.grade}
@@ -105,23 +119,28 @@ const TeamRecapCard = memo(function TeamRecapCard({
       {/* Stats row */}
       <div className="flex items-center gap-3 text-[10px] text-muted-foreground flex-wrap">
         <span>
-          Total Value:{" "}
-          <span className={cn("font-bold", tg.totalValue > 0 ? "text-green-400" : tg.totalValue < 0 ? "text-red-400" : "")}>
-            {tg.totalValue > 0 ? "+" : ""}{tg.totalValue}
+          Score:{" "}
+          <span className={cn("font-bold", tg.totalScore > 0 ? "text-green-400" : tg.totalScore < 0 ? "text-red-400" : "")}>
+            {tg.totalScore > 0 ? "+" : ""}{tg.totalScore}
           </span>
         </span>
         <span>
-          Avg/pick:{" "}
-          <span className={cn("font-bold", tg.avgValue > leagueAvg ? "text-green-400" : tg.avgValue < leagueAvg ? "text-red-400" : "")}>
-            {tg.avgValue > 0 ? "+" : ""}{tg.avgValue.toFixed(1)}
+          Avg:{" "}
+          <span className={cn("font-bold", tg.avgScore > leagueAvg ? "text-green-400" : tg.avgScore < leagueAvg ? "text-red-400" : "")}>
+            {tg.avgScore > 0 ? "+" : ""}{tg.avgScore.toFixed(1)}
           </span>
         </span>
         <span className="text-green-400 font-semibold">
-          {tg.stealCount} steal{tg.stealCount !== 1 ? "s" : ""}
+          🎯 {tg.stealCount} steal{tg.stealCount !== 1 ? "s" : ""}
         </span>
         <span className="text-red-400 font-semibold">
-          {tg.reachCount} reach{tg.reachCount !== 1 ? "es" : ""}
+          📉 {tg.reachCount} reach{tg.reachCount !== 1 ? "es" : ""}
         </span>
+        {tg.wasteCount > 0 && (
+          <span className="text-orange-400 font-semibold">
+            🗑️ {tg.wasteCount} waste{tg.wasteCount !== 1 ? "s" : ""}
+          </span>
+        )}
         <span>{tg.picks.length} picks</span>
       </div>
 
@@ -141,25 +160,34 @@ const TeamRecapCard = memo(function TeamRecapCard({
       </div>
 
       {/* Best Steal & Biggest Reach */}
-      <div className="space-y-0.5">
-        {tg.bestSteal && tg.bestSteal.value > 0 && (
+      <div className="space-y-1">
+        {tg.bestSteal && (
           <div className="text-[10px]">
             <span className="text-green-400 font-semibold">🎯 Best steal:</span>{" "}
             <span className="text-foreground">{tg.bestSteal.player.name}</span>{" "}
+            <PositionBadge position={tg.bestSteal.player.position} />{" "}
             <span className="text-muted-foreground">
-              (Rd {tg.bestSteal.pick.round}.{String(tg.bestSteal.pick.pick_in_round).padStart(2, "0")}, ADP {tg.bestSteal.player.adp_rank ?? "N/A"})
+              at {tg.bestSteal.pick.round}.{String(tg.bestSteal.pick.pick_in_round).padStart(2, "0")}
+              {" "}— BPA #{tg.bestSteal.overallBpaRank}
             </span>{" "}
-            <span className="text-green-400 font-bold">+{tg.bestSteal.value}</span>
+            <span className="text-green-400 font-bold">+{tg.bestSteal.score}</span>
           </div>
         )}
         {tg.biggestReach && (
           <div className="text-[10px]">
             <span className="text-red-400 font-semibold">📉 Biggest reach:</span>{" "}
             <span className="text-foreground">{tg.biggestReach.player.name}</span>{" "}
+            <PositionBadge position={tg.biggestReach.player.position} />{" "}
             <span className="text-muted-foreground">
-              (Rd {tg.biggestReach.pick.round}.{String(tg.biggestReach.pick.pick_in_round).padStart(2, "0")}, ADP {tg.biggestReach.player.adp_rank ?? "N/A"})
+              at {tg.biggestReach.pick.round}.{String(tg.biggestReach.pick.pick_in_round).padStart(2, "0")}
+              {" "}— BPA #{tg.biggestReach.overallBpaRank}
             </span>{" "}
-            <span className="text-red-400 font-bold">{tg.biggestReach.value}</span>
+            <span className="text-red-400 font-bold">{tg.biggestReach.score}</span>
+            {tg.biggestReach.receipts.length > 0 && (
+              <span className="text-muted-foreground ml-1">
+                (passed on {tg.biggestReach.receipts.map((r) => r.name).join(", ")})
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -182,23 +210,8 @@ const TeamRecapCard = memo(function TeamRecapCard({
 
       {expanded && (
         <div className="space-y-0.5 pt-1 border-t border-border/50">
-          {tg.picks.map(({ player, pick, value }) => (
-            <div key={pick.id} className="flex items-center gap-1.5 text-[11px]">
-              <span className="text-muted-foreground font-mono w-8 text-right shrink-0">
-                {pick.round}.{String(pick.pick_in_round).padStart(2, "0")}
-              </span>
-              <PositionBadge position={player.position} />
-              <span className="flex-1 truncate">{player.name}</span>
-              <span className="text-[10px] text-muted-foreground">ADP {player.adp_rank ?? "—"}</span>
-              <span
-                className={cn(
-                  "text-[10px] font-mono font-bold shrink-0",
-                  value > 0 ? "text-green-400" : value < 0 ? "text-red-400" : "text-muted-foreground",
-                )}
-              >
-                {value > 0 ? "+" : ""}{value}
-              </span>
-            </div>
+          {tg.picks.map((gp) => (
+            <PickRow key={gp.pick.id} gp={gp} />
           ))}
         </div>
       )}
@@ -218,65 +231,10 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
 
   const isDraftComplete = completedPicks.length === picks.length && picks.length > 0;
 
-  const { teamGrades, leagueAvg } = useMemo(() => {
-    const raw = teams.map((team) => {
-      const teamPicks = completedPicks
-        .filter((p) => p.team_id === team.id)
-        .map((pick) => {
-          const player = players.find((pl) => pl.id === pick.player_id);
-          if (!player) return null;
-          const value = (player.adp_rank ?? pick.overall_pick) - pick.overall_pick;
-          return { player, pick, value };
-        })
-        .filter(Boolean) as TeamGrade["picks"];
-
-      const totalValue = teamPicks.reduce((sum, p) => sum + p.value, 0);
-      const avgValue = teamPicks.length > 0 ? totalValue / teamPicks.length : 0;
-      const stealCount = teamPicks.filter((p) => p.value >= 10).length;
-      const reachCount = teamPicks.filter((p) => p.value <= -10).length;
-
-      const bestSteal = teamPicks.length > 0
-        ? teamPicks.reduce((best, p) => (p.value > best.value ? p : best))
-        : null;
-      const biggestReach = teamPicks.length > 0
-        ? teamPicks.reduce((worst, p) => (p.value < worst.value ? p : worst))
-        : null;
-
-      const posCounts: Record<string, number> = {};
-      for (const tp of teamPicks) {
-        posCounts[tp.player.position] = (posCounts[tp.player.position] ?? 0) + 1;
-      }
-
-      return {
-        team,
-        picks: teamPicks,
-        totalValue,
-        avgValue,
-        stealCount,
-        reachCount,
-        bestSteal: bestSteal ? { player: bestSteal.player, value: bestSteal.value, pick: bestSteal.pick } : null,
-        biggestReach: biggestReach && biggestReach.value < 0
-          ? { player: biggestReach.player, value: biggestReach.value, pick: biggestReach.pick }
-          : null,
-        posCounts,
-        grade: "", // filled after ranking
-        rank: 0,
-      };
-    }).sort((a, b) => b.totalValue - a.totalValue);
-
-    // Assign ranks and grades
-    const total = raw.length;
-    const leagueTotal = raw.reduce((s, t) => s + t.avgValue, 0);
-    const avg = total > 0 ? leagueTotal / total : 0;
-
-    const grades: TeamGrade[] = raw.map((t, i) => ({
-      ...t,
-      rank: i + 1,
-      grade: gradeFromRank(i + 1, total),
-    }));
-
-    return { teamGrades: grades, leagueAvg: avg };
-  }, [teams, completedPicks, players]);
+  const { teamGrades, leagueAvg } = useMemo(
+    () => gradeDraft(players, picks, teams),
+    [players, picks, teams],
+  );
 
   // Build AI summary map
   const aiSummaryMap = useMemo(() => {
@@ -295,22 +253,26 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
       await generateRecap({
         leagueAvgValue: leagueAvg,
         teams: teamGrades.map((tg) => ({
-          teamName: tg.team.team_name,
-          managerName: tg.team.manager_name ?? "",
+          teamName: tg.teamName,
+          managerName: tg.managerName,
           rank: tg.rank,
           grade: tg.grade,
-          totalValue: tg.totalValue,
-          avgValue: tg.avgValue,
+          totalValue: tg.totalScore,
+          avgValue: tg.avgScore,
           stealCount: tg.stealCount,
           reachCount: tg.reachCount,
-          picks: tg.picks.map((p) => ({
-            playerName: p.player.name,
-            position: p.player.position,
-            round: p.pick.round,
-            pickInRound: p.pick.pick_in_round,
-            overallPick: p.pick.overall_pick,
-            adpRank: p.player.adp_rank,
-            value: p.value,
+          wasteCount: tg.wasteCount,
+          picks: tg.picks.map((gp) => ({
+            playerName: gp.player.name,
+            position: gp.player.position,
+            round: gp.pick.round,
+            pickInRound: gp.pick.pick_in_round,
+            overallPick: gp.pick.overall_pick,
+            adpRank: gp.player.adp_rank,
+            value: gp.score,
+            classification: gp.classification,
+            bpaRank: gp.overallBpaRank,
+            receipts: gp.receipts.map((r) => `${r.name} (${r.position})`),
           })),
         })),
       });
@@ -338,7 +300,7 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
               {isDraftComplete ? "🏆 Final Draft Recap" : "📊 Draft Recap (In Progress)"}
             </h2>
             <span className="text-xs text-muted-foreground">
-              {completedPicks.length}/{picks.length} picks • Ranked best to worst • League avg value/pick:{" "}
+              {completedPicks.length}/{picks.length} picks • Board-aware BPA grading • League avg:{" "}
               <span className={cn("font-bold", leagueAvg > 0 ? "text-green-400" : leagueAvg < 0 ? "text-red-400" : "")}>
                 {leagueAvg > 0 ? "+" : ""}{leagueAvg.toFixed(1)}
               </span>
@@ -358,19 +320,23 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
         </div>
 
         {/* Legend */}
-        <div className="rounded-lg border border-border/50 bg-card/50 p-3 text-[11px] text-muted-foreground space-y-1">
-          <p className="font-semibold text-foreground text-xs">How to read this</p>
+        <div className="rounded-lg border border-border/50 bg-card/50 p-3 text-[11px] text-muted-foreground space-y-1.5">
+          <p className="font-semibold text-foreground text-xs">How Board-Aware BPA Grading Works</p>
           <p>
-            <strong>Value</strong> = Player's ADP rank − the overall pick# they were drafted at.
-            <span className="text-green-400"> Positive = steal</span> (picked later than ADP says).
-            <span className="text-red-400"> Negative = reach</span> (picked earlier than ADP).
+            For every pick, we simulate who was still on the board at that moment — <strong>keepers are excluded</strong> from the pool
+            (they were never available). Then we rank the pick against the best remaining players.
+          </p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+            <p>🎯 <strong className="text-green-400">Steal</strong> — Took a top-3 available RB/WR at their position</p>
+            <p>✅ <strong className="text-blue-400">Right Pick</strong> — Solid value, top-7 available RB/WR</p>
+            <p>📉 <strong className="text-red-400">Reach</strong> — Passed on clearly better RB/WR (receipts shown)</p>
+            <p>🗑️ <strong className="text-orange-400">Pos. Waste</strong> — 2nd QB/TE when quality RB/WR was on board</p>
+          </div>
+          <p>
+            <strong>QB/TE bonus:</strong> If a QB or TE fell 40+ ADP spots in the available pool, it counts as a steal (value grab).
           </p>
           <p>
-            <strong>Total Value</strong> = sum of all pick values for a team.
-            <strong> Grades</strong> are curved — the team with the most total value gets the top grade, ranked against all {teams.length} teams.
-          </p>
-          <p>
-            <strong>Steal</strong> = value ≥ +10 | <strong>Reach</strong> = value ≤ −10. Players without ADP data are treated as neutral (value = 0).
+            <strong>Grades</strong> are curved 1→{teams.length} — top scorer gets A+, bottom gets F. Scores sum each pick's BPA rating.
           </p>
         </div>
 
@@ -378,9 +344,9 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
         <div className="space-y-3">
           {teamGrades.map((tg) => (
             <TeamRecapCard
-              key={tg.team.id}
+              key={tg.teamId}
               tg={tg}
-              aiSummary={aiSummaryMap.get(tg.team.team_name) ?? null}
+              aiSummary={aiSummaryMap.get(tg.teamName) ?? null}
               leagueAvg={leagueAvg}
             />
           ))}
