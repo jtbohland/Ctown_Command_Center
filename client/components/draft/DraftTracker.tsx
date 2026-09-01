@@ -31,7 +31,7 @@ const PickRow = memo(function PickRow({
   return (
     <div
       className={cn(
-        "flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-all",
+        "flex items-center gap-1.5 px-2 py-1.5 rounded-md text-sm transition-all",
         isCurrent && !pick.is_complete && "bg-primary/15 border border-primary/40 shadow-[0_0_12px_-3px] shadow-primary/30",
         pick.is_complete && "opacity-80",
         !isCurrent && !pick.is_complete && "opacity-50",
@@ -51,7 +51,7 @@ const PickRow = memo(function PickRow({
       {/* Team name */}
       <span
         className={cn(
-          "text-xs w-24 truncate shrink-0",
+          "text-xs w-16 truncate shrink-0",
           pick.is_my_team && "font-bold text-primary",
         )}
       >
@@ -64,7 +64,7 @@ const PickRow = memo(function PickRow({
           <div className="flex items-center gap-1.5">
             <PositionBadge position={pick.player_position ?? "?"} className="text-[8px] px-1 py-0" />
             <span className="text-xs font-medium truncate">{pick.player_name}</span>
-            <span className="text-[10px] text-muted-foreground">{pick.player_nfl_team}</span>
+            <span className="text-[10px] text-muted-foreground shrink-0">{pick.player_nfl_team}</span>
             {pick.is_write_in && (
               <span className="text-[9px] px-1 py-0 rounded bg-amber-600/30 text-amber-400 font-medium" title="Write-in player">
                 ✏️
