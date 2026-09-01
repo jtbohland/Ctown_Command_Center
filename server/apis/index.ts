@@ -52,6 +52,9 @@ import ParseWaiverScreenshot from './waivers/parse-waiver-screenshot.js';
 import ApplyWaiverTransactions from './waivers/apply-waiver-transactions.js';
 import GetWaiverTransactions from './waivers/get-waiver-transactions.js';
 import BackupTables from './settings/backup-tables.js';
+import InitExchangeAdp from './exchange/init-exchange-adp.js';
+import SeedExchangeAdp from './exchange/seed-exchange-adp.js';
+import GetRosterGrades from './exchange/get-roster-grades.js';
 
 
 const apis = {
@@ -106,6 +109,9 @@ const apis = {
   ApplyWaiverTransactions,
   GetWaiverTransactions,
   BackupTables,
+  InitExchangeAdp,
+  SeedExchangeAdp,
+  GetRosterGrades,
 } as const;
 
 export default apis;
