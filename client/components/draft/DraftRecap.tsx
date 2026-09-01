@@ -324,7 +324,7 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
     // Main 3 tiles — RB/WR only
     const steals = [...allPicks]
       .filter((p) => p.classification === "steal" && isRbWr(p) && hasAdp(p))
-      .sort((a, b) => adpDiff(b) - adpDiff(a))
+      .sort((a, b) => adpDiff(a) - adpDiff(b))
       .slice(0, 5);
     const reaches = [...allPicks]
       .filter((p) => (p.classification === "reach") && isRbWr(p) && hasAdp(p))
@@ -341,7 +341,7 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
     // QB/TE corner — one QB and one TE per category
     const qbPicks = allPicks.filter((p) => p.player.position === "QB" && hasAdp(p));
     const tePicks = allPicks.filter((p) => p.player.position === "TE" && hasAdp(p));
-    const bestByFall = (arr: typeof allPicks) => [...arr].sort((a, b) => adpDiff(b) - adpDiff(a))[0] ?? null;
+    const bestByFall = (arr: typeof allPicks) => [...arr].sort((a, b) => adpDiff(a) - adpDiff(b))[0] ?? null;
     const worstWaste = (arr: typeof allPicks) => [...arr].filter((p) => p.classification === "positional_waste").sort((a, b) => a.score - b.score)[0] ?? null;
     const bestTiming = (arr: typeof allPicks) => [...arr].sort((a, b) =>
       Math.abs((a.player.adp_rank ?? 999) - a.pick.overall_pick) - Math.abs((b.player.adp_rank ?? 999) - b.pick.overall_pick),
