@@ -224,6 +224,22 @@ export default function WaiverUploader() {
           </div>
         )}
 
+        {/* Preview step — empty result */}
+        {step === "preview" && parsedTransactions.length === 0 && (
+          <div className="space-y-3">
+            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-md px-3 py-3 text-center">
+              <p className="text-sm font-semibold text-yellow-500 mb-1">⚠️ No transactions found</p>
+              <p className="text-xs text-muted-foreground">
+                Gemini couldn't extract any transactions from the screenshot(s). Try a clearer image or crop to just the transaction list.
+              </p>
+            </div>
+            <Button variant="outline" onClick={handleReset} className="w-full">
+              <Icon icon="upload" className="h-4 w-4 mr-2" />
+              Try Again
+            </Button>
+          </div>
+        )}
+
         {/* Preview step */}
         {step === "preview" && parsedTransactions.length > 0 && (
           <div className="space-y-3">
