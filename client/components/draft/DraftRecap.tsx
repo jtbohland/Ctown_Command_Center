@@ -338,19 +338,22 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
       )
       .slice(0, 5);
 
-    // QB/TE corner — notable moments
-    const qbTePicks = allPicks.filter((p) => isQbTe(p) && hasAdp(p));
-    const qbTeBestFall = [...qbTePicks].sort((a, b) => adpDiff(b) - adpDiff(a))[0] ?? null;
-    const qbTeWorstWaste = [...qbTePicks]
-      .filter((p) => p.classification === "positional_waste")
-      .sort((a, b) => a.score - b.score)[0] ?? null;
-    const qbTePerfect = [...qbTePicks]
-      .sort((a, b) =>
-        Math.abs((a.player.adp_rank ?? 999) - a.pick.overall_pick) -
-        Math.abs((b.player.adp_rank ?? 999) - b.pick.overall_pick),
-      )[0] ?? null;
+    // QB/TE corner — one QB and one TE per category
+    const qbPicks = allPicks.filter((p) => p.player.position === "QB" && hasAdp(p));
+    const tePicks = allPicks.filter((p) => p.player.position === "TE" && hasAdp(p));
+    const bestByFall = (arr: typeof allPicks) => [...arr].sort((a, b) => adpDiff(b) - adpDiff(a))[0] ?? null;
+    const worstWaste = (arr: typeof allPicks) => [...arr].filter((p) => p.classification === "positional_waste").sort((a, b) => a.score - b.score)[0] ?? null;
+    const bestTiming = (arr: typeof allPicks) => [...arr].sort((a, b) =>
+      Math.abs((a.player.adp_rank ?? 999) - a.pick.overall_pick) - Math.abs((b.player.adp_rank ?? 999) - b.pick.overall_pick),
+    )[0] ?? null;
 
-    return { steals, reaches, perfect, qbTe: { bestFall: qbTeBestFall, worstWaste: qbTeWorstWaste, perfect: qbTePerfect } };
+    const qbTe = {
+      bestFall: { qb: bestByFall(qbPicks), te: bestByFall(tePicks) },
+      worstWaste: { qb: worstWaste(qbPicks), te: worstWaste(tePicks) },
+      perfect: { qb: bestTiming(qbPicks), te: bestTiming(tePicks) },
+    };
+
+    return { steals, reaches, perfect, qbTe };
   }, [teamGrades]);
 
   const handleGenerateAI = useCallback(async () => {
@@ -515,42 +518,28 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
                 🧊 QB/TE Corner
               </p>
               <div className="space-y-2">
-                {superlatives.qbTe.bestFall && (
-                  <div>
-                    <p className="text-[9px] uppercase tracking-wider text-purple-400/60 font-semibold">Best Value</p>
-                    <div className="flex items-center gap-1.5 text-[10px]">
-                      <PositionBadge position={superlatives.qbTe.bestFall.player.position} />
-                      <span className="font-medium truncate">{superlatives.qbTe.bestFall.player.name}</span>
-                    </div>
-                    <p className="text-[9px] text-muted-foreground/50">
-                      Pick {superlatives.qbTe.bestFall.pick.round}.{String(superlatives.qbTe.bestFall.pick.pick_in_round).padStart(2, "0")} · ADP {superlatives.qbTe.bestFall.player.adp_rank ?? "—"} · {superlatives.qbTe.bestFall.teamName}
-                    </p>
+                {(
+                  [
+                    { label: "Best Value", qb: superlatives.qbTe.bestFall.qb, te: superlatives.qbTe.bestFall.te },
+                    { label: "Worst Waste", qb: superlatives.qbTe.worstWaste.qb, te: superlatives.qbTe.worstWaste.te },
+                    { label: "Perfect Timing", qb: superlatives.qbTe.perfect.qb, te: superlatives.qbTe.perfect.te },
+                  ] as const
+                ).map(({ label, qb, te }) => (
+                  <div key={label}>
+                    <p className="text-[9px] uppercase tracking-wider text-purple-400/60 font-semibold">{label}</p>
+                    {[qb, te].map((entry) =>
+                      entry ? (
+                        <div key={entry.pick.id} className="flex items-center gap-1.5 text-[10px]">
+                          <PositionBadge position={entry.player.position} />
+                          <span className="font-medium truncate flex-1 min-w-0">{entry.player.name}</span>
+                          <span className="text-[9px] text-muted-foreground/50 shrink-0">
+                            {entry.pick.round}.{String(entry.pick.pick_in_round).padStart(2, "0")} · ADP {entry.player.adp_rank ?? "—"}
+                          </span>
+                        </div>
+                      ) : null,
+                    )}
                   </div>
-                )}
-                {superlatives.qbTe.worstWaste && (
-                  <div>
-                    <p className="text-[9px] uppercase tracking-wider text-purple-400/60 font-semibold">Worst Waste</p>
-                    <div className="flex items-center gap-1.5 text-[10px]">
-                      <PositionBadge position={superlatives.qbTe.worstWaste.player.position} />
-                      <span className="font-medium truncate">{superlatives.qbTe.worstWaste.player.name}</span>
-                    </div>
-                    <p className="text-[9px] text-muted-foreground/50">
-                      Pick {superlatives.qbTe.worstWaste.pick.round}.{String(superlatives.qbTe.worstWaste.pick.pick_in_round).padStart(2, "0")} · ADP {superlatives.qbTe.worstWaste.player.adp_rank ?? "—"} · {superlatives.qbTe.worstWaste.teamName}
-                    </p>
-                  </div>
-                )}
-                {superlatives.qbTe.perfect && (
-                  <div>
-                    <p className="text-[9px] uppercase tracking-wider text-purple-400/60 font-semibold">Perfect Timing</p>
-                    <div className="flex items-center gap-1.5 text-[10px]">
-                      <PositionBadge position={superlatives.qbTe.perfect.player.position} />
-                      <span className="font-medium truncate">{superlatives.qbTe.perfect.player.name}</span>
-                    </div>
-                    <p className="text-[9px] text-muted-foreground/50">
-                      Pick {superlatives.qbTe.perfect.pick.round}.{String(superlatives.qbTe.perfect.pick.pick_in_round).padStart(2, "0")} · ADP {superlatives.qbTe.perfect.player.adp_rank ?? "—"} · {superlatives.qbTe.perfect.teamName}
-                    </p>
-                  </div>
-                )}
+                ))}
               </div>
             </div>
           </div>
