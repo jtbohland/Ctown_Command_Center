@@ -139,15 +139,17 @@ type DraftSuperlativesProps = {
   players: Player[];
   currentOverallPick: number;
   onDraft: (playerId: number) => void;
+  keeperCount?: number;
 };
 
-export default memo(function DraftSuperlatives({ players, currentOverallPick, onDraft }: DraftSuperlativesProps) {
+export default memo(function DraftSuperlatives({ players, currentOverallPick, onDraft, keeperCount = 0 }: DraftSuperlativesProps) {
   const { tiles, bestByPosition } = useMemo(() => {
     const available = players.filter((p) => !p.is_drafted && !p.is_keeper && p.adp_rank != null);
+    const effectivePick = currentOverallPick + keeperCount;
 
     const enrich = (p: Player): TilePlayer => ({
       ...p,
-      adpGap: Math.round(currentOverallPick - (p.adp_rank ?? 0)),
+      adpGap: Math.round(effectivePick - (p.adp_rank ?? 0)),
       parsedTags: p.tags ? p.tags.split(",") : [],
     });
 
@@ -193,7 +195,7 @@ export default memo(function DraftSuperlatives({ players, currentOverallPick, on
       ].filter((t) => t.players.length > 0),
       bestByPosition: bestByPos,
     };
-  }, [players, currentOverallPick]);
+  }, [players, currentOverallPick, keeperCount]);
 
   if (tiles.length === 0 && bestByPosition.length === 0) return null;
 
@@ -206,7 +208,7 @@ export default memo(function DraftSuperlatives({ players, currentOverallPick, on
           Draft Day Superlatives
         </h3>
         <span className="text-[9px] text-muted-foreground/60 ml-auto">
-          vs pick #{currentOverallPick}
+          vs pick #{currentOverallPick + keeperCount}
         </span>
       </div>
 
