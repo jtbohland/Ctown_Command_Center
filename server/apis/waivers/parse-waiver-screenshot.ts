@@ -213,8 +213,10 @@ Return ONLY the JSON array — no markdown, no explanation.`;
     }
 
     const teamByManager = new Map<string, z.infer<typeof TeamSchema>>();
+    const teamByName = new Map<string, z.infer<typeof TeamSchema>>();
     for (const t of allTeams) {
       teamByManager.set(t.manager_name.toLowerCase(), t);
+      teamByName.set(t.team_name.toLowerCase(), t);
     }
 
     // ── 4. Check existing hashes for dedup ──
@@ -259,11 +261,49 @@ Return ONLY the JSON array — no markdown, no explanation.`;
         }
       }
 
-      // Match team
+      // Match team — try manager name first, then fall back to team name matching
       let teamId: number | null = null;
       let teamMatched = false;
-      const managerKey = txn.manager_name.toLowerCase();
-      const teamMatch = teamByManager.get(managerKey);
+      const managerKey = txn.manager_name.toLowerCase().trim();
+      let teamMatch = teamByManager.get(managerKey);
+
+      if (!teamMatch) {
+        // Exact team name match (Gemini often extracts Sleeper team names instead of manager names)
+        teamMatch = teamByName.get(managerKey) ?? undefined;
+      }
+
+      if (!teamMatch) {
+        // Fuzzy: check if extracted name is contained in a team name or vice-versa
+        for (const [tName, team] of teamByName) {
+          if (tName.includes(managerKey) || managerKey.includes(tName)) {
+            teamMatch = team;
+            break;
+          }
+        }
+      }
+
+      if (!teamMatch) {
+        // Keyword match: any significant word (>3 chars) from the extracted name appears in a team name
+        const words = managerKey.split(/\s+/);
+        for (const [tName, team] of teamByName) {
+          if (words.some((w) => w.length > 3 && tName.includes(w))) {
+            teamMatch = team;
+            break;
+          }
+        }
+      }
+
+      if (!teamMatch) {
+        // Reverse keyword: any significant word from a team name appears in the extracted name
+        for (const [tName, team] of teamByName) {
+          const teamWords = tName.split(/\s+/);
+          if (teamWords.some((w) => w.length > 3 && managerKey.includes(w))) {
+            teamMatch = team;
+            break;
+          }
+        }
+      }
+
       if (teamMatch) {
         teamId = teamMatch.id;
         teamMatched = true;
