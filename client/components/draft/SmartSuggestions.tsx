@@ -7,7 +7,7 @@ import PositionBadge from "./PositionBadge";
 import { getTagEmoji, getPlayerSos, getPlayerVegas, getRookieStarDisplay, getKeeperWindow, getTeamEmoji, STARTING_SLOTS, type Player, type Team, type DraftPick, type KeeperWindow } from "@/lib/draft-constants";
 import RatingBars, { parseRatingString } from "./RatingBars";
 import { VegasBar } from "./VegasBar";
-import FallingBoard from "./FallingBoard";
+import DraftSuperlatives from "./DraftSuperlatives";
 
 type SmartSuggestionsProps = {
   players: Player[];
@@ -890,9 +890,9 @@ export default function SmartSuggestions({ players, myTeam, isMyPick, currentOve
             </div>
           )}
 
-          {/* Falling Board — independent ADP value tracker */}
+          {/* Draft Superlatives — ADP-based value tiles */}
           <div className="mt-3">
-            <FallingBoard
+            <DraftSuperlatives
               players={players}
               currentOverallPick={currentOverallPick}
               onDraft={onDraft}
