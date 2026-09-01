@@ -152,7 +152,7 @@ Return ONLY the JSON array — no markdown, no explanation.`;
           ],
           generationConfig: {
             temperature: 0.1,
-            maxOutputTokens: 4096,
+            maxOutputTokens: 16384,
           },
         },
       },
@@ -162,15 +162,30 @@ Return ONLY the JSON array — no markdown, no explanation.`;
 
     const rawText = result.candidates[0]?.content.parts[0]?.text ?? "[]";
     // Strip markdown code fences if present
-    const jsonText = rawText.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim();
+    let jsonText = rawText.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim();
 
     let parsed: z.infer<typeof ParsedTransactionSchema>[];
     try {
       const rawParsed = JSON.parse(jsonText);
       parsed = z.array(ParsedTransactionSchema).parse(rawParsed);
-    } catch (e) {
-      ctx.log.error("Failed to parse Gemini response", { rawText });
-      throw new Error(`Failed to parse Gemini response: ${String(e)}`);
+    } catch (firstErr) {
+      // Gemini may truncate mid-JSON — try to salvage by closing the array
+      ctx.log.warn("Initial JSON parse failed, attempting truncation recovery", { rawText: rawText.slice(0, 500) });
+      try {
+        // Find the last complete object (ends with })
+        const lastBrace = jsonText.lastIndexOf("}");
+        if (lastBrace > 0) {
+          const trimmed = jsonText.slice(0, lastBrace + 1) + "]";
+          const rawParsed = JSON.parse(trimmed);
+          parsed = z.array(ParsedTransactionSchema).parse(rawParsed);
+          warnings.push(`Gemini response was truncated — recovered ${parsed.length} transaction(s). Try uploading fewer screenshots at once.`);
+        } else {
+          throw firstErr;
+        }
+      } catch (recoveryErr) {
+        ctx.log.error("Failed to parse Gemini response even after recovery", { rawText });
+        throw new Error(`Failed to parse Gemini response: ${String(firstErr)}`);
+      }
     }
 
     ctx.log.info(`Gemini extracted ${parsed.length} transactions`);
