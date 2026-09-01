@@ -318,39 +318,67 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
     // For reaches: players drafted earliest vs ADP → most POSITIVE diff
     const adpDiff = (gp: (typeof allPicks)[0]) => (gp.player.adp_rank ?? 999) - gp.pick.overall_pick;
     const isRbWr = (gp: (typeof allPicks)[0]) => gp.player.position === "RB" || gp.player.position === "WR";
-    const isQbTe = (gp: (typeof allPicks)[0]) => gp.player.position === "QB" || gp.player.position === "TE";
     const hasAdp = (gp: (typeof allPicks)[0]) => gp.player.adp_rank != null;
 
-    // Main 3 tiles — RB/WR only
-    const steals = [...allPicks]
-      .filter((p) => p.classification === "steal" && isRbWr(p) && hasAdp(p))
+    // Main 3 tiles — RB/WR only, purely ADP-based, deduplicated
+    const rbWrWithAdp = allPicks.filter((p) => isRbWr(p) && hasAdp(p));
+
+    // Steals: most negative adpDiff (fell the most past ADP)
+    const steals = [...rbWrWithAdp]
       .sort((a, b) => adpDiff(a) - adpDiff(b))
       .slice(0, 5);
-    const reaches = [...allPicks]
-      .filter((p) => (p.classification === "reach") && isRbWr(p) && hasAdp(p))
+
+    // Reaches: most positive adpDiff (drafted earliest before ADP)
+    const stealIds = new Set(steals.map((p) => p.player.id));
+    const reaches = [...rbWrWithAdp]
+      .filter((p) => !stealIds.has(p.player.id))
       .sort((a, b) => adpDiff(b) - adpDiff(a))
       .slice(0, 5);
-    const perfect = [...allPicks]
-      .filter((p) => isRbWr(p) && hasAdp(p))
+
+    // Perfect Picks: closest to ADP (smallest abs diff), excluding steals & reaches
+    const reachIds = new Set(reaches.map((p) => p.player.id));
+    const usedIds = new Set([...stealIds, ...reachIds]);
+    const perfect = [...rbWrWithAdp]
+      .filter((p) => !usedIds.has(p.player.id))
       .sort((a, b) =>
-        Math.abs((a.player.adp_rank ?? 999) - a.pick.overall_pick) -
-        Math.abs((b.player.adp_rank ?? 999) - b.pick.overall_pick),
+        Math.abs(adpDiff(a)) - Math.abs(adpDiff(b)),
       )
       .slice(0, 5);
 
-    // QB/TE corner — one QB and one TE per category
+    // QB/TE corner — one QB and one TE per category, deduplicated
     const qbPicks = allPicks.filter((p) => p.player.position === "QB" && hasAdp(p));
     const tePicks = allPicks.filter((p) => p.player.position === "TE" && hasAdp(p));
-    const bestByFall = (arr: typeof allPicks) => [...arr].sort((a, b) => adpDiff(a) - adpDiff(b))[0] ?? null;
-    const worstWaste = (arr: typeof allPicks) => [...arr].filter((p) => p.classification === "positional_waste").sort((a, b) => a.score - b.score)[0] ?? null;
-    const bestTiming = (arr: typeof allPicks) => [...arr].sort((a, b) =>
-      Math.abs((a.player.adp_rank ?? 999) - a.pick.overall_pick) - Math.abs((b.player.adp_rank ?? 999) - b.pick.overall_pick),
-    )[0] ?? null;
+
+    // Helper: pick first from arr not in excludeIds
+    const pickFirst = (arr: typeof allPicks, excludeIds: Set<number>) =>
+      arr.find((p) => !excludeIds.has(p.player.id)) ?? null;
+
+    // Best Value (biggest fall = most negative adpDiff) — assigned first
+    const qbByFall = [...qbPicks].sort((a, b) => adpDiff(a) - adpDiff(b));
+    const teByFall = [...tePicks].sort((a, b) => adpDiff(a) - adpDiff(b));
+    const bestFallQb = qbByFall[0] ?? null;
+    const bestFallTe = teByFall[0] ?? null;
+    const qbUsed = new Set(bestFallQb ? [bestFallQb.player.id] : [] as number[]);
+    const teUsed = new Set(bestFallTe ? [bestFallTe.player.id] : [] as number[]);
+
+    // Worst Reach (most positive adpDiff) — assigned second
+    const qbByReach = [...qbPicks].sort((a, b) => adpDiff(b) - adpDiff(a));
+    const teByReach = [...tePicks].sort((a, b) => adpDiff(b) - adpDiff(a));
+    const worstReachQb = pickFirst(qbByReach, qbUsed);
+    const worstReachTe = pickFirst(teByReach, teUsed);
+    if (worstReachQb) qbUsed.add(worstReachQb.player.id);
+    if (worstReachTe) teUsed.add(worstReachTe.player.id);
+
+    // Perfect Timing (smallest abs diff) — assigned last, excludes above
+    const qbByTiming = [...qbPicks].sort((a, b) => Math.abs(adpDiff(a)) - Math.abs(adpDiff(b)));
+    const teByTiming = [...tePicks].sort((a, b) => Math.abs(adpDiff(a)) - Math.abs(adpDiff(b)));
+    const perfectQb = pickFirst(qbByTiming, qbUsed);
+    const perfectTe = pickFirst(teByTiming, teUsed);
 
     const qbTe = {
-      bestFall: { qb: bestByFall(qbPicks), te: bestByFall(tePicks) },
-      worstWaste: { qb: worstWaste(qbPicks), te: worstWaste(tePicks) },
-      perfect: { qb: bestTiming(qbPicks), te: bestTiming(tePicks) },
+      bestFall: { qb: bestFallQb, te: bestFallTe },
+      worstWaste: { qb: worstReachQb, te: worstReachTe },
+      perfect: { qb: perfectQb, te: perfectTe },
     };
 
     return { steals, reaches, perfect, qbTe };
