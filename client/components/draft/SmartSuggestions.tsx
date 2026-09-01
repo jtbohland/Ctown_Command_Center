@@ -896,6 +896,7 @@ export default function SmartSuggestions({ players, myTeam, isMyPick, currentOve
               players={players}
               currentOverallPick={currentOverallPick}
               onDraft={onDraft}
+              keeperCount={players.filter((p) => p.is_keeper).length}
             />
           </div>
         </>

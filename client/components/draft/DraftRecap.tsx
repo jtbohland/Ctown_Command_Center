@@ -25,8 +25,9 @@ type DraftRecapProps = {
 };
 
 // ─── Pick Row ───────────────────────────────────────────────
-const PickRow = memo(function PickRow({ gp }: { gp: GradedPick }) {
+const PickRow = memo(function PickRow({ gp, keeperCount }: { gp: GradedPick; keeperCount: number }) {
   const { player, pick, classification, score, boardContext, overallBpaRank, adpFallBonus } = gp;
+  const effectivePick = pick.overall_pick + keeperCount;
   const [open, setOpen] = useState(false);
 
   return (
@@ -69,12 +70,12 @@ const PickRow = memo(function PickRow({ gp }: { gp: GradedPick }) {
           className={cn(
             "text-[10px] font-mono shrink-0 w-10 text-right tabular-nums",
             player.adp_rank != null
-              ? (player.adp_rank - pick.overall_pick) > 0 ? "text-red-400/70" : "text-green-400/70"
+              ? (player.adp_rank - effectivePick) > 0 ? "text-red-400/70" : "text-green-400/70"
               : "text-muted-foreground/40",
           )}
           title={player.adp_rank != null
             ? (() => {
-                const d = Math.round(player.adp_rank - pick.overall_pick);
+                const d = Math.round(player.adp_rank - effectivePick);
                 return d > 0
                   ? `Drafted ${d} picks before experts expected — a reach`
                   : d < 0
@@ -85,7 +86,7 @@ const PickRow = memo(function PickRow({ gp }: { gp: GradedPick }) {
           }
         >
           {player.adp_rank != null
-            ? (() => { const d = Math.round(player.adp_rank - pick.overall_pick); return d > 0 ? `+${d}` : `${d}`; })()
+            ? (() => { const d = Math.round(player.adp_rank - effectivePick); return d > 0 ? `+${d}` : `${d}`; })()
             : "—"}
         </span>
         <Icon
@@ -133,10 +134,12 @@ const TeamRecapCard = memo(function TeamRecapCard({
   tg,
   aiSummary,
   leagueAvg,
+  keeperCount,
 }: {
   tg: TeamGrade;
   aiSummary: string | null;
   leagueAvg: number;
+  keeperCount: number;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -271,7 +274,7 @@ const TeamRecapCard = memo(function TeamRecapCard({
           </div>
           <div className="space-y-0">
             {tg.picks.map((gp) => (
-              <PickRow key={gp.pick.id} gp={gp} />
+              <PickRow key={gp.pick.id} gp={gp} keeperCount={keeperCount} />
             ))}
           </div>
         </div>
@@ -308,6 +311,9 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
     return map;
   }, [aiData]);
 
+  // Keeper offset: since keepers are pre-assigned, the first draft pick is effectively pick (keeperCount + 1)
+  const keeperCount = useMemo(() => players.filter((p) => p.is_keeper).length, [players]);
+
   // Draft superlatives — top 5 steals, reaches, and perfect picks across all teams
   const superlatives = useMemo(() => {
     const allPicks = teamGrades.flatMap((tg) =>
@@ -316,7 +322,7 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
     // ADP differential: positive = ADP higher than pick slot (drafted before ADP)
     // For steals: players who fell the most (picked later than ADP) → most NEGATIVE diff
     // For reaches: players drafted earliest vs ADP → most POSITIVE diff
-    const adpDiff = (gp: (typeof allPicks)[0]) => (gp.player.adp_rank ?? 999) - gp.pick.overall_pick;
+    const adpDiff = (gp: (typeof allPicks)[0]) => (gp.player.adp_rank ?? 999) - (gp.pick.overall_pick + keeperCount);
     const isRbWr = (gp: (typeof allPicks)[0]) => gp.player.position === "RB" || gp.player.position === "WR";
     const hasAdp = (gp: (typeof allPicks)[0]) => gp.player.adp_rank != null;
 
@@ -382,7 +388,7 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
     };
 
     return { steals, reaches, perfect, qbTe };
-  }, [teamGrades]);
+  }, [teamGrades, keeperCount]);
 
   const handleGenerateAI = useCallback(async () => {
     setAiRequested(true);
@@ -524,7 +530,7 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
                           color === "blue" && "text-blue-400",
                         )}>
                           {(() => {
-                            const diff = Math.round((gp.player.adp_rank ?? 0) - gp.pick.overall_pick);
+                            const diff = Math.round((gp.player.adp_rank ?? 0) - (gp.pick.overall_pick + keeperCount));
                             if (color === "blue") return `±${Math.abs(diff)}`;
                             if (color === "green") { const fall = -diff; return fall > 0 ? `+${fall}` : `${fall}`; }
                             return diff > 0 ? `+${diff}` : `${diff}`;
@@ -585,6 +591,7 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
               tg={tg}
               aiSummary={aiSummaryMap.get(tg.teamName) ?? null}
               leagueAvg={leagueAvg}
+              keeperCount={keeperCount}
             />
           ))}
         </div>
