@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import PositionBadge from "./PositionBadge";
 import { ROSTER_SLOTS, STARTING_SLOTS, getTeamEmoji, type Player, type Team } from "@/lib/draft-constants";
+import { computePlayerValue } from "@/lib/player-values";
 
 type AllTeamRostersProps = {
   players: Player[];
@@ -19,7 +20,7 @@ type SlotAssignment = {
   player: Player | null;
 };
 
-// ---------- Grading System (League-Curved) ----------
+// ---------- Grading System (League-Curved, 60/40 ADP+Dynasty) ----------
 
 type GradeInfo = {
   letter: string;
@@ -34,10 +35,14 @@ function gradeInfo(grade: string): GradeInfo {
       return { letter: "A+", emoji: "🔥", colorClass: "text-green-400", bgClass: "bg-green-500/15 border-green-500/30" };
     case "A":
       return { letter: "A", emoji: "🔥", colorClass: "text-green-400", bgClass: "bg-green-500/10 border-green-500/25" };
+    case "A-":
+      return { letter: "A-", emoji: "🔥", colorClass: "text-green-400", bgClass: "bg-green-500/10 border-green-500/20" };
     case "B+":
       return { letter: "B+", emoji: "💪", colorClass: "text-blue-400", bgClass: "bg-blue-500/15 border-blue-500/30" };
     case "B":
       return { letter: "B", emoji: "💪", colorClass: "text-blue-400", bgClass: "bg-blue-500/10 border-blue-500/25" };
+    case "B-":
+      return { letter: "B-", emoji: "💪", colorClass: "text-blue-400", bgClass: "bg-blue-500/10 border-blue-500/20" };
     case "C+":
       return { letter: "C+", emoji: "☔️", colorClass: "text-amber-400", bgClass: "bg-amber-500/15 border-amber-500/30" };
     case "C":
@@ -51,91 +56,64 @@ function gradeInfo(grade: string): GradeInfo {
 }
 
 /**
- * Compute a blended roster score for a team.
- * Formula per player: 70% × max(0, 100 - adp_rank) + 30% × max(0, 100 - dynasty_rank)
- * Dynasty league: ADP still drives most of the score (win now), but dynasty
- * value rewards teams with younger, more tradeable/keepable assets.
- * Players missing dynasty_rank fall back to ADP-only scoring.
+ * Compute the total blended roster value for a team.
+ * Uses shared computePlayerValue (60% ADP + 40% Dynasty, 1-500 scale).
+ * Uses drafted_team_id only — this is the frozen draft-day snapshot.
  */
-function computePlayerValue(p: Player): { total: number; adpVal: number; dynVal: number } {
-  const adpVal = p.adp_rank != null ? Math.max(0, 100 - p.adp_rank) : 0;
-  const dynVal = p.dynasty_rank != null ? Math.max(0, 100 - p.dynasty_rank) : 0;
-  // If no dynasty data, weight 100% to ADP to avoid penalizing
-  const hasDyn = p.dynasty_rank != null;
-  const total = hasDyn ? 0.7 * adpVal + 0.3 * dynVal : adpVal;
-  return { total, adpVal, dynVal };
-}
-
-function computeTeamScores(players: Player[], teamId: number): { blended: number; adpTotal: number; dynTotal: number } {
+function computeTeamScore(players: Player[], teamId: number): number {
   const roster = players.filter(
     (p) => p.is_drafted && p.drafted_team_id === teamId,
   );
-  let blended = 0, adpTotal = 0, dynTotal = 0;
+  let total = 0;
   for (const p of roster) {
-    const v = computePlayerValue(p);
-    blended += v.total;
-    adpTotal += v.adpVal;
-    dynTotal += v.dynVal;
+    total += computePlayerValue(p.adp_rank, p.dynasty_rank);
   }
-  return { blended, adpTotal, dynTotal };
+  return Math.round(total * 10) / 10;
 }
 
 type TeamGradeResult = {
   grade: GradeInfo;
   rawScore: number;
-  adpScore: number;
-  dynScore: number;
   rank: number;
   playerCount: number;
 };
+
+/** Shared 10-grade percentile ladder (matches Redux Rosters server-side). */
+function gradeFromRank(rank: number, totalTeams: number): string {
+  const pct = (rank - 1) / totalTeams;
+  if (pct < 0.09) return "A+";
+  if (pct < 0.18) return "A";
+  if (pct < 0.27) return "A-";
+  if (pct < 0.36) return "B+";
+  if (pct < 0.50) return "B";
+  if (pct < 0.63) return "B-";
+  if (pct < 0.72) return "C+";
+  if (pct < 0.81) return "C";
+  if (pct < 0.90) return "D";
+  return "F";
+}
 
 /**
  * Curve all teams against the league.
  * Returns a map of teamId -> grade info.
  */
 function computeLeagueGrades(players: Player[], teams: Team[]): Map<number, TeamGradeResult> {
-  // Calculate blended scores for every team
-  const teamScores = teams.map((t) => {
-    const scores = computeTeamScores(players, t.id);
-    return {
-      id: t.id,
-      score: scores.blended,
-      adpScore: scores.adpTotal,
-      dynScore: scores.dynTotal,
-      count: players.filter((p) => p.is_drafted && p.drafted_team_id === t.id).length,
-    };
-  });
+  const teamScores = teams.map((t) => ({
+    id: t.id,
+    score: computeTeamScore(players, t.id),
+    count: players.filter((p) => p.is_drafted && p.drafted_team_id === t.id).length,
+  }));
 
-  // Sort by score descending to determine rank
   const sorted = [...teamScores].sort((a, b) => b.score - a.score);
   const totalTeams = sorted.length;
-
-  // Assign grades based on percentile rank
-  // A+ = rank 1 only (top ~9%), A = rank 2-3 (~18-27%)
-  // B+ = rank 4-5, B = rank 6-7
-  // C+ = rank 8, C = rank 9
-  // D = rank 10, F = rank 11
-  function gradeFromRank(rank: number): string {
-    const pct = (rank - 1) / totalTeams; // 0 = best, ~1 = worst
-    if (pct < 0.1) return "A+";   // rank 1 of 11
-    if (pct < 0.27) return "A";   // rank 2-3
-    if (pct < 0.45) return "B+";  // rank 4-5
-    if (pct < 0.64) return "B";   // rank 6-7
-    if (pct < 0.73) return "C+";  // rank 8
-    if (pct < 0.82) return "C";   // rank 9
-    if (pct < 0.91) return "D";   // rank 10
-    return "F";                    // rank 11
-  }
 
   const result = new Map<number, TeamGradeResult>();
   for (let i = 0; i < sorted.length; i++) {
     const ts = sorted[i];
-    const letter = gradeFromRank(i + 1);
+    const letter = gradeFromRank(i + 1, totalTeams);
     result.set(ts.id, {
       grade: gradeInfo(letter),
-      rawScore: Math.round(ts.score * 10) / 10,
-      adpScore: Math.round(ts.adpScore * 10) / 10,
-      dynScore: Math.round(ts.dynScore * 10) / 10,
+      rawScore: ts.score,
       rank: i + 1,
       playerCount: ts.count,
     });
@@ -270,7 +248,7 @@ function TeamCard({
   }, [players]);
 
   const slots = useMemo(() => assignRosterSlots(teamPlayers), [teamPlayers]);
-  const { grade, rawScore, adpScore, dynScore, rank, playerCount } = gradeResult;
+  const { grade, rawScore, rank, playerCount } = gradeResult;
 
   const filledStarters = slots.filter((s) => s.isStarter && s.player).length;
   const totalStarters = STARTING_SLOTS.length;
@@ -331,7 +309,7 @@ function TeamCard({
         </div>
         <div className="text-[10px] text-muted-foreground">
           <span className="font-bold">{rawScore}</span>
-          <span className="ml-1 opacity-60" title="ADP / Dynasty">(A:{adpScore} D:{dynScore})</span>
+          <span className="ml-1 opacity-60">pts</span>
         </div>
       </div>
 
@@ -420,7 +398,7 @@ export default function AllTeamRosters({ players, teams, onSwapKeeper }: AllTeam
               key={team.id}
               team={team}
               players={players}
-              gradeResult={leagueGrades.get(team.id) ?? { grade: gradeInfo("B"), rawScore: 0, adpScore: 0, dynScore: 0, rank: 99, playerCount: 0 }}
+              gradeResult={leagueGrades.get(team.id) ?? { grade: gradeInfo("B"), rawScore: 0, rank: 99, playerCount: 0 }}
               onSwapKeeper={onSwapKeeper}
             />
           ))}

@@ -15,6 +15,7 @@ const RosterPlayerSchema = z.object({
   name: z.string(),
   position: z.string(),
   adp_rank: z.coerce.number().nullable(),
+  dynasty_rank: z.coerce.number().nullable(),
   roster_team_id: z.coerce.number().nullable(),
 });
 
@@ -37,10 +38,12 @@ const CountSchema = z.object({ cnt: z.coerce.number() });
 
 const MAX_ADP = 500;
 
-function computePlayerValue(adpRank: number | null): number {
+function computePlayerValue(adpRank: number | null, dynastyRank?: number | null): number {
   if (adpRank == null || adpRank <= 0) return 0;
-  const clamped = Math.min(adpRank, MAX_ADP);
-  return Math.round(((MAX_ADP - clamped + 1) / MAX_ADP) * 100 * 10) / 10;
+  const adpVal = Math.round(((MAX_ADP - Math.min(adpRank, MAX_ADP) + 1) / MAX_ADP) * 100 * 10) / 10;
+  if (dynastyRank == null || dynastyRank <= 0) return adpVal;
+  const dynVal = Math.round(((MAX_ADP - Math.min(dynastyRank, MAX_ADP) + 1) / MAX_ADP) * 100 * 10) / 10;
+  return Math.round((0.60 * adpVal + 0.40 * dynVal) * 10) / 10;
 }
 
 /** C-Town roster grade ramp (separate from trade verdicts) */
@@ -53,15 +56,21 @@ function getActualsWeight(lastCompletedWeek: number): number {
   return 0.85;
 }
 
-const GRADE_LADDER = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D", "F"] as const;
+const GRADE_LADDER = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "D", "F"] as const;
 
 function rankToGrade(rank: number, totalTeams: number): string {
   if (totalTeams <= 0 || rank <= 0) return "F";
-  const idx = Math.min(
-    Math.floor(((rank - 1) / totalTeams) * GRADE_LADDER.length),
-    GRADE_LADDER.length - 1,
-  );
-  return GRADE_LADDER[idx];
+  const pct = (rank - 1) / totalTeams;
+  if (pct < 0.09) return "A+";
+  if (pct < 0.18) return "A";
+  if (pct < 0.27) return "A-";
+  if (pct < 0.36) return "B+";
+  if (pct < 0.50) return "B";
+  if (pct < 0.63) return "B-";
+  if (pct < 0.72) return "C+";
+  if (pct < 0.81) return "C";
+  if (pct < 0.90) return "D";
+  return "F";
 }
 
 function normalizeName(name: string): string {
@@ -142,7 +151,7 @@ export default api({
 
     // 2. Load rostered players
     const rosterPlayers = await ctx.integrations.apps_db.query(
-      `SELECT p.id, p.name, p.position, p.adp_rank,
+      `SELECT p.id, p.name, p.position, p.adp_rank, p.dynasty_rank,
               COALESCE(p.roster_team_id, p.drafted_team_id) AS roster_team_id
        FROM ffwr_players p
        WHERE p.roster_team_id IS NOT NULL OR p.drafted_team_id IS NOT NULL
@@ -232,12 +241,11 @@ export default api({
 
         // Baseline: Exchange ADP if available, otherwise fall back to player's draft ADP
         const exchangeRank = exchangeAdpMap.get(nameNorm);
-        const baselineValue = exchangeRank
-          ? computePlayerValue(exchangeRank)
-          : computePlayerValue(player.adp_rank); // Fall back to draft ADP
+        const baselineAdpRank = exchangeRank ?? player.adp_rank;
+        const baselineValue = computePlayerValue(baselineAdpRank, player.dynasty_rank);
 
         if (weekWeight === 0 || !actualsMap.has(nameNorm)) {
-          // Preseason or no actuals for this player → pure ADP
+          // Preseason or no actuals for this player → pure ADP+Dynasty blend
           totalValue += baselineValue;
         } else {
           // Blended: baseline × (1 - weight) + actuals_value × weight

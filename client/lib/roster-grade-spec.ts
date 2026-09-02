@@ -5,16 +5,22 @@
 // The full computation lives server-side in GetRosterGrades.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type LetterGrade = "A+" | "A" | "A−" | "B+" | "B" | "B−" | "C+" | "C" | "C−" | "D+" | "D" | "F";
+export type LetterGrade = "A+" | "A" | "A-" | "B+" | "B" | "B-" | "C+" | "C" | "D" | "F";
 
-const GRADE_BY_RANK: LetterGrade[] = [
-  "A+", "A", "A−", "B+", "B", "B−", "C+", "C", "C−", "D+", "D",
-];
-
-export function gradeFromRank(rank: number): LetterGrade {
-  if (rank < 1) return "A+";
-  if (rank > GRADE_BY_RANK.length) return "F";
-  return GRADE_BY_RANK[rank - 1];
+/** Shared 10-grade percentile ladder (matches server-side rankToGrade). */
+export function gradeFromRank(rank: number, totalTeams: number): LetterGrade {
+  if (totalTeams <= 0 || rank <= 0) return "A+";
+  const pct = (rank - 1) / totalTeams;
+  if (pct < 0.09) return "A+";
+  if (pct < 0.18) return "A";
+  if (pct < 0.27) return "A-";
+  if (pct < 0.36) return "B+";
+  if (pct < 0.50) return "B";
+  if (pct < 0.63) return "B-";
+  if (pct < 0.72) return "C+";
+  if (pct < 0.81) return "C";
+  if (pct < 0.90) return "D";
+  return "F";
 }
 
 /** Grade badge background color. */
