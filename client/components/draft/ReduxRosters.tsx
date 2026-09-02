@@ -18,6 +18,10 @@ import {
 } from "@/components/ui/dialog";
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
 import { formatPlayerValueLabel } from "@/lib/player-values";
+import { gradeBgClass } from "@/lib/roster-grade-spec";
+import type { LetterGrade } from "@/lib/roster-grade-spec";
+import ExchangeAdpUploader from "@/components/exchange/ExchangeAdpUploader";
+import TrajectoryChart from "@/components/exchange/TrajectoryChart";
 
 interface Team {
   id: number;
@@ -47,6 +51,17 @@ interface Props {
 const POSITION_ORDER = ["QB", "RB", "WR", "TE"] as const;
 
 // ─── Player Row ─────────────────────────────────────────────
+const ColumnHeader = memo(function ColumnHeader() {
+  return (
+    <div className="flex items-center gap-2 px-2 py-0.5 text-[9px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/30 mb-0.5">
+      <span className="w-7 text-center">Pos</span>
+      <span className="flex-1">Player</span>
+      <span className="w-8 text-right">Team</span>
+      <span className="w-[88px] text-right">Rank · Value</span>
+    </div>
+  );
+});
+
 const PlayerRow = memo(function PlayerRow({ player }: { player: RosterPlayer }) {
   return (
     <div className="flex items-center gap-2 px-2 py-1 rounded text-xs hover:bg-muted/30">
@@ -57,10 +72,8 @@ const PlayerRow = memo(function PlayerRow({ player }: { player: RosterPlayer }) 
         {player.name}
         {player.is_keeper && <span className="text-amber-400 ml-1 text-[10px]">🔒</span>}
       </span>
-      {player.nfl_team && (
-        <span className="text-[10px] text-muted-foreground w-8 text-right">{player.nfl_team}</span>
-      )}
-      <span className="text-[10px] text-muted-foreground w-20 text-right font-mono">
+      <span className="text-[10px] text-muted-foreground w-8 text-right">{player.nfl_team || ""}</span>
+      <span className="text-[10px] text-muted-foreground w-[88px] text-right font-mono tabular-nums">
         {formatPlayerValueLabel(player.adp_rank, player.position, player.positional_rank)}
       </span>
     </div>
@@ -72,10 +85,12 @@ const TeamRosterCard = memo(function TeamRosterCard({
   team,
   players,
   isMyTeam,
+  grade,
 }: {
   team: Team;
   players: RosterPlayer[];
   isMyTeam: boolean;
+  grade?: { grade: string; rank: number; totalValue: number };
 }) {
   const byPosition = useMemo(() => {
     const map = new Map<string, RosterPlayer[]>();
@@ -107,6 +122,15 @@ const TeamRosterCard = memo(function TeamRosterCard({
           <span className="text-[10px] text-muted-foreground">{team.manager_name}</span>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          {grade && (
+            <Badge
+              variant="outline"
+              className={`text-[10px] px-1.5 font-bold border ${gradeBgClass(grade.grade as LetterGrade)}`}
+              title={`#${grade.rank} · Value: ${grade.totalValue.toFixed(1)}`}
+            >
+              {grade.grade}
+            </Badge>
+          )}
           <Badge variant="secondary" className="text-[10px] px-1.5">
             {players.length} players
           </Badge>
@@ -125,6 +149,7 @@ const TeamRosterCard = memo(function TeamRosterCard({
 
       {/* Player list by position */}
       <div className="p-2 space-y-1">
+        {players.length > 0 && <ColumnHeader />}
         {POSITION_ORDER.map((pos) => {
           const group = byPosition.get(pos) ?? [];
           if (group.length === 0) return null;
@@ -150,8 +175,25 @@ const TeamRosterCard = memo(function TeamRosterCard({
 // ─── Main Component ─────────────────────────────────────────
 export default function ReduxRosters({ teams }: Props) {
   const { data, loading, fetching, isError, error, refetch } = useApiData("GetRosterData", {});
+  const {
+    data: gradesData,
+    loading: gradesLoading,
+    refetch: refetchGrades,
+  } = useApiData("GetRosterGrades", { season: "2026-27" });
   const { run: redraft, loading: redraftLoading } = useApi("Redraft");
   const [showRedraftDialog, setShowRedraftDialog] = useState(false);
+  const [showAdpUploader, setShowAdpUploader] = useState(false);
+
+  // Grade lookup: teamId → grade info
+  const gradeByTeam = useMemo(() => {
+    const map = new Map<number, { grade: string; rank: number; totalValue: number }>();
+    if (gradesData?.teamGrades) {
+      for (const g of gradesData.teamGrades) {
+        map.set(g.teamId, { grade: g.grade, rank: g.rank, totalValue: g.totalValue });
+      }
+    }
+    return map;
+  }, [gradesData?.teamGrades]);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const searchTimer = useState<ReturnType<typeof setTimeout> | null>(null);
@@ -275,15 +317,25 @@ export default function ReduxRosters({ teams }: Props) {
             className="h-7 w-48 text-xs"
           />
           {isAdmin && (
-            <Button
-              variant="destructive"
-              size="sm"
-              className="h-7 text-xs gap-1"
-              disabled={redraftLoading || totalPlayers === 0}
-              onClick={() => setShowRedraftDialog(true)}
-            >
-              🔄 Redux Redraft
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs gap-1"
+                onClick={() => setShowAdpUploader(true)}
+              >
+                📊 Current ADP
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="h-7 text-xs gap-1"
+                disabled={redraftLoading || totalPlayers === 0}
+                onClick={() => setShowRedraftDialog(true)}
+              >
+                🔄 Redux Redraft
+              </Button>
+            </>
           )}
           <Dialog open={showRedraftDialog} onOpenChange={setShowRedraftDialog}>
             <DialogContent className="max-w-md">
@@ -309,8 +361,29 @@ export default function ReduxRosters({ teams }: Props) {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          <ExchangeAdpUploader
+            open={showAdpUploader}
+            onOpenChange={setShowAdpUploader}
+            onSuccess={() => {
+              refetchGrades();
+            }}
+          />
         </div>
       </div>
+
+      {/* Trajectory Chart */}
+      {gradesData?.hasExchangeAdp && (
+        <TrajectoryChart
+          teams={teams}
+          trajectory={gradesData.trajectory ?? []}
+          teamGrades={gradesData.teamGrades ?? []}
+        />
+      )}
+      {!gradesLoading && !gradesData?.hasExchangeAdp && (
+        <div className="text-xs text-muted-foreground bg-muted/30 rounded-lg p-3 text-center">
+          Upload a Current ADP sheet to enable team grades and trajectory tracking.
+        </div>
+      )}
 
       {/* Team Grid */}
       <ScrollArea className="max-h-[calc(100vh-250px)]">
@@ -321,6 +394,7 @@ export default function ReduxRosters({ teams }: Props) {
               team={team}
               players={players}
               isMyTeam={team.id === myTeamId}
+              grade={gradeByTeam.get(team.id)}
             />
           ))}
         </div>

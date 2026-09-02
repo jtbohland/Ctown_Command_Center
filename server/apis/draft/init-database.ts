@@ -134,17 +134,17 @@ export default api({
 
     // ── 3. Seed 11 real teams ─────────────────────────────────────────
     const teams = [
-      { name: "Crabcakes & Football", manager: "JT", color: "#1e3a5f", isMyTeam: true, pos: 1 },
-      { name: "Boston TD Party", manager: "Tyler", color: "#c41e3a", isMyTeam: false, pos: 2 },
-      { name: "Davis D", manager: "Brooke", color: "#6b4c9a", isMyTeam: false, pos: 3 },
-      { name: "Gym Rats", manager: "Carson", color: "#2d7d46", isMyTeam: false, pos: 4 },
-      { name: "Mountain Dude", manager: "AJ", color: "#5d8aa8", isMyTeam: false, pos: 5 },
-      { name: "Rat Pack", manager: "Adam", color: "#d4a843", isMyTeam: false, pos: 6 },
-      { name: "Rush Hour", manager: "Drew", color: "#e87722", isMyTeam: false, pos: 7 },
-      { name: "Teal Titans", manager: "Erik", color: "#008080", isMyTeam: false, pos: 8 },
-      { name: "The McCartel", manager: "Jimmy", color: "#8b0000", isMyTeam: false, pos: 9 },
-      { name: "The Smith Football Team", manager: "Chuck", color: "#4a6741", isMyTeam: false, pos: 10 },
-      { name: "You Know 12 Out Here!", manager: "Jordan", color: "#1c5ba0", isMyTeam: false, pos: 11 },
+      { name: "Crabcakes & Football", manager: "JT", color: "#D64830", isMyTeam: true, pos: 1 },
+      { name: "Boston TD Party", manager: "Tyler", color: "#A0522D", isMyTeam: false, pos: 2 },
+      { name: "Davis D", manager: "Brooke", color: "#7B2D8E", isMyTeam: false, pos: 3 },
+      { name: "Gym Rats", manager: "Carson", color: "#2E8B57", isMyTeam: false, pos: 4 },
+      { name: "Drews Cruise", manager: "AJ", color: "#1E90FF", isMyTeam: false, pos: 5 },
+      { name: "Rat Pack", manager: "Adam", color: "#E87BA4", isMyTeam: false, pos: 6 },
+      { name: "Rush Hour", manager: "Drew", color: "#E8650A", isMyTeam: false, pos: 7 },
+      { name: "Teal Titans", manager: "Erik", color: "#00B4A0", isMyTeam: false, pos: 8 },
+      { name: "The McCartel", manager: "Jimmy", color: "#C7345B", isMyTeam: false, pos: 9 },
+      { name: "The Smith Football Team", manager: "Chuck", color: "#6B7B82", isMyTeam: false, pos: 10 },
+      { name: "You Know 12 Out Here!", manager: "Jordan", color: "#1E3A8A", isMyTeam: false, pos: 11 },
     ];
 
     // Batch team insert (1 query instead of 11)

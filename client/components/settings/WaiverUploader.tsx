@@ -224,11 +224,27 @@ export default function WaiverUploader() {
           </div>
         )}
 
+        {/* Preview step — empty result */}
+        {step === "preview" && parsedTransactions.length === 0 && (
+          <div className="space-y-3">
+            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-md px-3 py-3 text-center">
+              <p className="text-sm font-semibold text-yellow-500 mb-1">⚠️ No transactions found</p>
+              <p className="text-xs text-muted-foreground">
+                Gemini couldn't extract any transactions from the screenshot(s). Try a clearer image or crop to just the transaction list.
+              </p>
+            </div>
+            <Button variant="outline" onClick={handleReset} className="w-full">
+              <Icon icon="upload" className="h-4 w-4 mr-2" />
+              Try Again
+            </Button>
+          </div>
+        )}
+
         {/* Preview step */}
         {step === "preview" && parsedTransactions.length > 0 && (
-          <div className="space-y-3">
+          <div className="flex flex-col gap-3 max-h-[480px]">
             {/* Stats bar */}
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap shrink-0">
               <Badge variant="secondary" className="text-[10px]">
                 {parsedTransactions.length} found
               </Badge>
@@ -244,7 +260,7 @@ export default function WaiverUploader() {
 
             {/* Warnings */}
             {parseWarnings.length > 0 && (
-              <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-md px-3 py-2">
+              <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-md px-3 py-2 shrink-0">
                 <p className="text-[10px] font-semibold text-yellow-500 mb-1">⚠️ Warnings:</p>
                 {parseWarnings.slice(0, 5).map((w, i) => (
                   <p key={i} className="text-[10px] text-yellow-400/80">• {w}</p>
@@ -257,8 +273,8 @@ export default function WaiverUploader() {
               </div>
             )}
 
-            {/* Transaction list */}
-            <ScrollArea className="max-h-[320px] rounded-md border">
+            {/* Transaction list — scrollable, fills available space */}
+            <ScrollArea className="min-h-0 flex-1 rounded-md border">
               <div className="p-2 space-y-1">
                 {parsedTransactions.map((txn, i) => (
                   <div
@@ -318,8 +334,8 @@ export default function WaiverUploader() {
               </div>
             </ScrollArea>
 
-            {/* Actions */}
-            <div className="flex items-center gap-2">
+            {/* Actions — pinned at bottom */}
+            <div className="flex items-center gap-2 shrink-0">
               <Button
                 onClick={handleApply}
                 disabled={newTransactions.length === 0 || applying}

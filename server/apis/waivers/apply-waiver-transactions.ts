@@ -133,14 +133,18 @@ export default api({
       }
 
       // 2. Drop player from roster (release to FA)
-      if (txn.dropped_player_id) {
+      // IMPORTANT: Only clear roster if this team currently owns the player.
+      // When transactions are processed in batch, a later add from team B may
+      // have already claimed the player before team A's drop is processed.
+      if (txn.dropped_player_id && txn.team_id) {
         try {
           await ctx.integrations.apps_db.execute(
             `UPDATE ffwr_players
              SET is_drafted = false, drafted_team_id = NULL, roster_team_id = NULL
-             WHERE id = $1`,
-            [txn.dropped_player_id],
-            { label: `Drop ${txn.dropped_player_name} to FA` },
+             WHERE id = $1
+               AND (roster_team_id = $2 OR roster_team_id IS NULL)`,
+            [txn.dropped_player_id, txn.team_id],
+            { label: `Drop ${txn.dropped_player_name} from team ${txn.team_id}` },
           );
           rosterChanges++;
         } catch (err) {

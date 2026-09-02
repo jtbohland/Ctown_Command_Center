@@ -123,14 +123,14 @@ export type DraftPick = {
 export const TEAM_EMOJIS: Record<string, string> = {
   "Crabcakes": "🦀",
   "Boston": "🫖",
-  "Mountain": "🏔️",
+  "Drews": "🛳️",
   "Davis": "🍆",
   "Rush": "🐲",
   "Smith": "🚬",
   "Rat Pack": "🐀",
   "Gym": "🏋🏻‍♂️",
   "McCartel": "🪇",
-  "You Know": "🕛",
+  "You Know": "🚔",
   "Teal": "🚙",
 };
 
@@ -502,15 +502,15 @@ export const LEAGUE = {
 
 // Manager-to-team mapping
 export const TEAMS_DATA = [
-  { name: "Crabcakes & Football", manager: "JT", color: "#1e3a5f", isMyTeam: true },
-  { name: "Boston TD Party", manager: "Tyler", color: "#c41e3a" },
-  { name: "Davis D", manager: "Brooke", color: "#6b4c9a" },
-  { name: "Gym Rats", manager: "Carson", color: "#2d7d46" },
-  { name: "Mountain Dude", manager: "AJ", color: "#5d8aa8" },
-  { name: "Rat Pack", manager: "Adam", color: "#d4a843", champion: true },
-  { name: "Rush Hour", manager: "Drew", color: "#e87722" },
-  { name: "Teal Titans", manager: "Erik", color: "#008080" },
-  { name: "The McCartel", manager: "Jimmy", color: "#8b0000" },
-  { name: "The Smith Football Team", manager: "Chuck", color: "#4a6741" },
-  { name: "You Know 12 Out Here!", manager: "Jordan", color: "#1c5ba0" },
+  { name: "Crabcakes & Football", manager: "JT", color: "#D64830", isMyTeam: true },
+  { name: "Boston TD Party", manager: "Tyler", color: "#A0522D" },
+  { name: "Davis D", manager: "Brooke", color: "#7B2D8E" },
+  { name: "Gym Rats", manager: "Carson", color: "#2E8B57" },
+  { name: "Drews Cruise", manager: "AJ", color: "#1E90FF" },
+  { name: "Rat Pack", manager: "Adam", color: "#E87BA4" },
+  { name: "Rush Hour", manager: "Drew", color: "#E8650A" },
+  { name: "Teal Titans", manager: "Erik", color: "#00B4A0" },
+  { name: "The McCartel", manager: "Jimmy", color: "#C7345B" },
+  { name: "The Smith Football Team", manager: "Chuck", color: "#6B7B82" },
+  { name: "You Know 12 Out Here!", manager: "Jordan", color: "#1E3A8A" },
 ] as const;

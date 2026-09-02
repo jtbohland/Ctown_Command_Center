@@ -12,6 +12,7 @@ type PlayerBoardProps = {
   players: Player[];
   onDraft: (playerId: number) => void;
   onToggleTag: (playerId: number, tag: TagKey) => void;
+  onRemove?: (playerId: number) => void;
   onWriteInCreated?: (player: {
     id: number;
     name: string;
@@ -20,11 +21,13 @@ type PlayerBoardProps = {
     bye_week: number | null;
   }) => void;
   onTradeAlert?: () => void;
+  currentOverallPick?: number;
+  keeperCount?: number;
 };
 
 const POSITIONS = ["ALL", "QB", "RB", "WR", "TE"] as const;
 
-export default function PlayerBoard({ players, onDraft, onToggleTag, onWriteInCreated, onTradeAlert }: PlayerBoardProps) {
+export default function PlayerBoard({ players, onDraft, onToggleTag, onRemove, onWriteInCreated, onTradeAlert, currentOverallPick, keeperCount }: PlayerBoardProps) {
   const [search, setSearch] = useState("");
   const [posFilter, setPosFilter] = useState<string>("ALL");
   const [tagFilter, setTagFilter] = useState<string | null>(null);
@@ -42,7 +45,7 @@ export default function PlayerBoard({ players, onDraft, onToggleTag, onWriteInCr
   useEffect(() => () => clearTimeout(timerRef.current), []);
 
   const availablePlayers = useMemo(() => {
-    return players.filter((p) => !p.is_drafted);
+    return players.filter((p) => !p.is_drafted && !p.tags?.includes("removed"));
   }, [players]);
 
   const filteredPlayers = useMemo(() => {
@@ -275,8 +278,11 @@ export default function PlayerBoard({ players, onDraft, onToggleTag, onWriteInCr
                 player={player}
                 onDraft={onDraft}
                 onToggleTag={onToggleTag}
+                onRemove={onRemove}
                 isHighlighted={player.tags?.includes("target")}
                 boardPosition={index + 1}
+                currentOverallPick={currentOverallPick}
+                keeperCount={keeperCount}
               />
             ))
           )}
