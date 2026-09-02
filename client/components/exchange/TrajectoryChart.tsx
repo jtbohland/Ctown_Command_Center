@@ -3,6 +3,7 @@ import {
   BarChart,
   Bar,
   Cell,
+  LabelList,
   LineChart,
   Line,
   XAxis,
@@ -133,6 +134,7 @@ const TrajectoryChart = memo(function TrajectoryChart({
       return {
         label: team?.manager_name ?? tk.name,
         fullLabel: tk.name,
+        emoji: team ? getTeamEmoji(team.team_name) : "🏈",
         value: (point[tk.dataKey] as number) ?? 0,
         color: tk.color,
         grade: grade?.grade ?? "—",
@@ -170,10 +172,10 @@ const TrajectoryChart = memo(function TrajectoryChart({
             — line chart appears once weekly actuals are uploaded
           </span>
         </div>
-        <ResponsiveContainer width="100%" height={340}>
+        <ResponsiveContainer width="100%" height={360}>
           <BarChart
             data={barData}
-            margin={{ top: 5, right: 10, left: 0, bottom: 20 }}
+            margin={{ top: 28, right: 10, left: 10, bottom: 30 }}
             barCategoryGap="20%"
           >
             <CartesianGrid
@@ -188,19 +190,56 @@ const TrajectoryChart = memo(function TrajectoryChart({
               tickLine={false}
               axisLine={false}
               interval={0}
-            />
+            >
+              <text
+                x="50%"
+                y="100%"
+                dy={14}
+                textAnchor="middle"
+                className="fill-muted-foreground"
+                style={{ fontSize: 11, fontWeight: 600 }}
+              >
+                Manager
+              </text>
+            </XAxis>
             <YAxis
               tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
               tickLine={false}
               axisLine={false}
-              width={45}
+              width={50}
               domain={[domainMin, domainMax]}
-            />
+            >
+              <text
+                x={0}
+                y="50%"
+                dx={-34}
+                textAnchor="middle"
+                className="fill-muted-foreground"
+                style={{ fontSize: 11, fontWeight: 600 }}
+                transform="rotate(-90, 14, 180)"
+              >
+                Team Value
+              </text>
+            </YAxis>
             <Tooltip content={<BarTooltip />} cursor={{ fill: "hsl(var(--accent))", opacity: 0.15 }} />
             <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={40}>
               {barData.map((entry, idx) => (
                 <Cell key={idx} fill={entry.color} fillOpacity={0.85} />
               ))}
+              <LabelList
+                dataKey="emoji"
+                position="top"
+                content={({ x, y, width, value }: any) => (
+                  <text
+                    x={(x ?? 0) + (width ?? 0) / 2}
+                    y={(y ?? 0) - 6}
+                    textAnchor="middle"
+                    style={{ fontSize: 16 }}
+                  >
+                    {value}
+                  </text>
+                )}
+              />
             </Bar>
           </BarChart>
         </ResponsiveContainer>
