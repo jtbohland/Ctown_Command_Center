@@ -13,9 +13,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import PositionBadge from "@/components/draft/PositionBadge";
 import { getTeamEmoji } from "@/lib/draft-constants";
 import ctownReduxLogo from "@/public/logos/ctown-redux.png";
-import ActualsUploader from "@/components/settings/ActualsUploader";
 import LeagueOfRecord from "@/components/settings/LeagueOfRecord";
-import WaiverUploader from "@/components/settings/WaiverUploader";
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -29,7 +27,7 @@ export default function SettingsPage() {
   const players = playersData?.players ?? [];
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploadMode, setUploadMode] = useState<"players" | "keepers" | "dynasty" | "rookie" | "roster">("players");
+  const [uploadMode, setUploadMode] = useState<"keepers" | "roster">("keepers");
   const [keeperTeamFilter, setKeeperTeamFilter] = useState<number | null>(null);
   const [keeperSearch, setKeeperSearch] = useState("");
   const [debouncedKeeperSearch, setDebouncedKeeperSearch] = useState("");
@@ -165,7 +163,7 @@ export default function SettingsPage() {
           </div>
           <Button onClick={() => navigate("/")} variant="default">
             <Icon icon="chevron-left" className="h-4 w-4 mr-1" />
-            Back to Command Center
+            Back to Exchange
           </Button>
         </div>
 
@@ -196,12 +194,9 @@ export default function SettingsPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               {/* Mode selector */}
-              <div className="grid grid-cols-5 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 {([
-                  { key: "players" as const, icon: "users", label: "Players /\nRankings" },
-                  { key: "dynasty" as const, icon: "crown", label: "Dynasty\nRankings" },
                   { key: "keepers" as const, icon: "shield", label: "Keeper\nList" },
-                  { key: "rookie" as const, icon: "baby", label: "Rookie\nRankings" },
                   { key: "roster" as const, icon: "clipboard-list", label: "Roster\nUpload" },
                 ] as const).map((tab) => (
                   <button
@@ -217,33 +212,11 @@ export default function SettingsPage() {
 
               {/* Mode description */}
               <div className="text-[11px] text-muted-foreground bg-accent/30 rounded-md px-3 py-2">
-                {uploadMode === "players" ? (
-                  <>
-                    <strong>Players/Rankings mode:</strong> Updates ADP, positional rank, and stats for existing players. New players in the CSV will be added.
-                    <br />
-                    <span className="text-[10px] opacity-75">
-                      Columns: Rank, Player (Bye), Pos, AVG, tier, upside, bust, sos, age
-                    </span>
-                  </>
-                ) : uploadMode === "dynasty" ? (
-                  <>
-                    <strong>Dynasty Rankings mode:</strong> Updates dynasty rank, dynasty tier, and age from a dynasty-specific CSV.
-                    <br />
-                    <span className="text-[10px] opacity-75">
-                      Columns: RK, TIERS, PLAYER NAME, TEAM, POS, AGE
-                    </span>
-                  </>
-                ) : uploadMode === "keepers" ? (
+                {uploadMode === "keepers" ? (
                   <>
                     <strong>Keeper mode:</strong> Bulk reassign all keepers. Clears existing and assigns new ones.
                     <br />
                     <span className="text-[10px] opacity-75">Columns: team (team name), player (player name)</span>
-                  </>
-                ) : uploadMode === "rookie" ? (
-                  <>
-                    <strong>Rookie Rankings mode:</strong> Import a rookie draft class with overall pick order, position, and age.
-                    <br />
-                    <span className="text-[10px] opacity-75">Columns: Rank/Pick, Player Name, Pos, Age (optional), Year (optional)</span>
                   </>
                 ) : (
                   <>
@@ -437,12 +410,6 @@ export default function SettingsPage() {
             )}
           </CardContent>
         </Card>
-
-        {/* Actuals Uploader */}
-        <ActualsUploader />
-
-        {/* Waiver Wire Uploader */}
-        <WaiverUploader />
 
         {/* The League of Record — historical CSV archive */}
         <LeagueOfRecord />

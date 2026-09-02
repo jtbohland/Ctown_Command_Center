@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
 import { formatPlayerValueLabel } from "@/lib/player-values";
+import ActualsUploader from "@/components/settings/ActualsUploader";
 import { gradeBgClass } from "@/lib/roster-grade-spec";
 import type { LetterGrade } from "@/lib/roster-grade-spec";
 import ExchangeAdpUploader from "@/components/exchange/ExchangeAdpUploader";
@@ -183,6 +184,7 @@ export default function ReduxRosters({ teams }: Props) {
   const { run: redraft, loading: redraftLoading } = useApi("Redraft");
   const [showRedraftDialog, setShowRedraftDialog] = useState(false);
   const [showAdpUploader, setShowAdpUploader] = useState(false);
+  const [showActualsUploader, setShowActualsUploader] = useState(false);
 
   // Grade lookup: teamId → grade info
   const gradeByTeam = useMemo(() => {
@@ -327,6 +329,14 @@ export default function ReduxRosters({ teams }: Props) {
                 📊 Current ADP
               </Button>
               <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs gap-1"
+                onClick={() => setShowActualsUploader(true)}
+              >
+                📈 Upload Actuals
+              </Button>
+              <Button
                 variant="destructive"
                 size="sm"
                 className="h-7 text-xs gap-1"
@@ -368,6 +378,11 @@ export default function ReduxRosters({ teams }: Props) {
               refetchGrades();
             }}
           />
+          <Dialog open={showActualsUploader} onOpenChange={setShowActualsUploader}>
+            <DialogContent className="max-w-2xl max-h-[85vh] overflow-auto">
+              <ActualsUploader />
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 

@@ -13,7 +13,15 @@ export const router = createBrowserRouter([
         path: "/",
         index: true,
         lazy: () =>
-          import("./pages/WarRoom/index.js").then((mod) => {
+          import("./pages/Exchange/index.js").then((mod) => {
+            const Component = mod.default;
+            return { Component };
+          }),
+      },
+      {
+        path: "/draft",
+        lazy: () =>
+          import("./pages/DraftRoom/index.js").then((mod) => {
             const Component = mod.default;
             return { Component };
           }),
@@ -47,7 +55,7 @@ export const router = createBrowserRouter([
               }
               hideActions={currentPath === "/"}
               buttonPath={"/"}
-              buttonText={"Return to Command Center"}
+              buttonText={"Return to Exchange"}
             />
           );
         },
