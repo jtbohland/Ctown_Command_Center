@@ -26,11 +26,23 @@ const DraftPickCapitalSchema = z.object({
   is_complete: z.coerce.boolean(),
 });
 
+const ExchangeAdpSchema = z.object({
+  player_name: z.string(),
+  position: z.string(),
+  adp_rank: z.coerce.number(),
+});
+
 const ColCheckSchema = z.object({ exists: z.coerce.boolean() });
+const CountSchema = z.object({ cnt: z.coerce.number() });
+
+/** Normalize player name for fuzzy matching between tables */
+function normalizeName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/\b(jr|sr|ii|iii|iv)\b/g, "").trim();
+}
 
 export default api({
   name: "GetRosterData",
-  description: "Fetches all rostered players with team assignments, plus 2026 draft picks for Treasury.",
+  description: "Fetches rostered players with live Exchange ADP ranks, plus 2026 draft picks.",
 
   integrations: {
     apps_db: postgres(APPS_DB),
@@ -44,7 +56,49 @@ export default api({
   }),
 
   async run(ctx) {
-    // Check if roster_team_id column exists (it gets created by SeedRosters)
+    // ── 1. Load Exchange ADP (latest uploaded sheet) ──────────
+    let exchangeAdp: z.infer<typeof ExchangeAdpSchema>[] = [];
+    try {
+      const [{ cnt }] = await ctx.integrations.apps_db.query(
+        `SELECT COUNT(*) as cnt FROM ffwr_exchange_adp`,
+        CountSchema,
+        undefined,
+        { label: "Check Exchange ADP count" },
+      );
+      if (cnt > 0) {
+        exchangeAdp = await ctx.integrations.apps_db.query(
+          `SELECT player_name, position, adp_rank
+           FROM ffwr_exchange_adp
+           ORDER BY adp_rank
+           LIMIT 600`,
+          ExchangeAdpSchema,
+          undefined,
+          { label: "Load Exchange ADP" },
+        );
+      }
+    } catch {
+      // Table doesn't exist yet — fall back to ffwr_players columns
+    }
+
+    // Build Exchange ADP lookup: normalized name → overall rank
+    const exchangeAdpMap = new Map<string, number>();
+    for (const row of exchangeAdp) {
+      exchangeAdpMap.set(normalizeName(row.player_name), row.adp_rank);
+    }
+
+    // Build positional rank lookup from Exchange ADP ordering
+    // e.g. if Exchange has WRs at ranks 3,4,6,8,... then WR at rank 3 = WR1, rank 4 = WR2, etc.
+    const posRankMap = new Map<string, Map<number, number>>(); // position → (overallRank → posRank)
+    const posCounts = new Map<string, number>();
+    for (const row of exchangeAdp) {
+      const pos = row.position;
+      if (!posCounts.has(pos)) posCounts.set(pos, 0);
+      posCounts.set(pos, posCounts.get(pos)! + 1);
+      if (!posRankMap.has(pos)) posRankMap.set(pos, new Map());
+      posRankMap.get(pos)!.set(row.adp_rank, posCounts.get(pos)!);
+    }
+
+    // ── 2. Check if roster_team_id column exists ─────────────
     const [{ exists: colExists }] = await ctx.integrations.apps_db.query(
       `SELECT EXISTS (
          SELECT 1 FROM information_schema.columns
@@ -52,15 +106,13 @@ export default api({
        ) AS exists`,
       ColCheckSchema,
       undefined,
-      { label: "Check if roster_team_id column exists" }
+      { label: "Check if roster_team_id column exists" },
     );
 
     let rosterPlayers: z.infer<typeof RosterPlayerSchema>[] = [];
 
     if (colExists) {
-      // Fetch all players with roster OR draft assignments (COALESCE ensures
-      // drafted players show even if roster_team_id wasn't synced)
-      rosterPlayers = await ctx.integrations.apps_db.query(
+      const rawPlayers = await ctx.integrations.apps_db.query(
         `SELECT p.id, p.name, p.position, p.nfl_team, p.adp_rank,
                 p.positional_rank,
                 COALESCE(p.roster_team_id, p.drafted_team_id) AS roster_team_id,
@@ -77,11 +129,28 @@ export default api({
          LIMIT 500`,
         RosterPlayerSchema,
         undefined,
-        { label: "Fetch all rostered + drafted players" }
+        { label: "Fetch all rostered + drafted players" },
       );
+
+      // Override ADP + positional rank from Exchange ADP when available
+      if (exchangeAdp.length > 0) {
+        rosterPlayers = rawPlayers.map((p) => {
+          const nameNorm = normalizeName(p.name);
+          const exchangeRank = exchangeAdpMap.get(nameNorm);
+          if (exchangeRank != null) {
+            // Use Exchange ADP rank and compute positional rank from it
+            const posMap = posRankMap.get(p.position);
+            const posRank = posMap?.get(exchangeRank) ?? p.positional_rank;
+            return { ...p, adp_rank: exchangeRank, positional_rank: posRank };
+          }
+          return p;
+        });
+      } else {
+        rosterPlayers = rawPlayers;
+      }
     }
 
-    // Fetch 2026 draft picks for Treasury (from draft board)
+    // ── 3. Fetch 2026 draft picks for Treasury ───────────────
     const draftPicks2026 = await ctx.integrations.apps_db.query(
       `SELECT dp.round, dp.pick_in_round, dp.overall_pick,
               dp.team_id, t.team_name, t.manager_name,
@@ -92,7 +161,7 @@ export default api({
        LIMIT 200`,
       DraftPickCapitalSchema,
       undefined,
-      { label: "Fetch 2026 draft picks for Treasury" }
+      { label: "Fetch 2026 draft picks for Treasury" },
     );
 
     return { rosterPlayers, draftPicks2026 };

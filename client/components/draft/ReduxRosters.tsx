@@ -51,6 +51,17 @@ interface Props {
 const POSITION_ORDER = ["QB", "RB", "WR", "TE"] as const;
 
 // ─── Player Row ─────────────────────────────────────────────
+const ColumnHeader = memo(function ColumnHeader() {
+  return (
+    <div className="flex items-center gap-2 px-2 py-0.5 text-[9px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/30 mb-0.5">
+      <span className="w-7 text-center">Pos</span>
+      <span className="flex-1">Player</span>
+      <span className="w-8 text-right">Team</span>
+      <span className="w-[88px] text-right">Rank · Value</span>
+    </div>
+  );
+});
+
 const PlayerRow = memo(function PlayerRow({ player }: { player: RosterPlayer }) {
   return (
     <div className="flex items-center gap-2 px-2 py-1 rounded text-xs hover:bg-muted/30">
@@ -61,10 +72,8 @@ const PlayerRow = memo(function PlayerRow({ player }: { player: RosterPlayer }) 
         {player.name}
         {player.is_keeper && <span className="text-amber-400 ml-1 text-[10px]">🔒</span>}
       </span>
-      {player.nfl_team && (
-        <span className="text-[10px] text-muted-foreground w-8 text-right">{player.nfl_team}</span>
-      )}
-      <span className="text-[10px] text-muted-foreground w-20 text-right font-mono">
+      <span className="text-[10px] text-muted-foreground w-8 text-right">{player.nfl_team || ""}</span>
+      <span className="text-[10px] text-muted-foreground w-[88px] text-right font-mono tabular-nums">
         {formatPlayerValueLabel(player.adp_rank, player.position, player.positional_rank)}
       </span>
     </div>
@@ -140,6 +149,7 @@ const TeamRosterCard = memo(function TeamRosterCard({
 
       {/* Player list by position */}
       <div className="p-2 space-y-1">
+        {players.length > 0 && <ColumnHeader />}
         {POSITION_ORDER.map((pos) => {
           const group = byPosition.get(pos) ?? [];
           if (group.length === 0) return null;
