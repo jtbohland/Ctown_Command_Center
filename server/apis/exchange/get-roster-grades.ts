@@ -14,6 +14,7 @@ const RosterPlayerSchema = z.object({
   id: z.coerce.number(),
   name: z.string(),
   position: z.string(),
+  adp_rank: z.coerce.number().nullable(),
   roster_team_id: z.coerce.number().nullable(),
 });
 
@@ -141,7 +142,7 @@ export default api({
 
     // 2. Load rostered players
     const rosterPlayers = await ctx.integrations.apps_db.query(
-      `SELECT p.id, p.name, p.position,
+      `SELECT p.id, p.name, p.position, p.adp_rank,
               COALESCE(p.roster_team_id, p.drafted_team_id) AS roster_team_id
        FROM ffwr_players p
        WHERE p.roster_team_id IS NOT NULL OR p.drafted_team_id IS NOT NULL
@@ -233,7 +234,7 @@ export default api({
         const exchangeRank = exchangeAdpMap.get(nameNorm);
         const baselineValue = exchangeRank
           ? computePlayerValue(exchangeRank)
-          : computePlayerValue(null); // No Exchange ADP = 0 value for grading
+          : computePlayerValue(player.adp_rank); // Fall back to draft ADP
 
         if (weekWeight === 0 || !actualsMap.has(nameNorm)) {
           // Preseason or no actuals for this player → pure ADP
