@@ -1,6 +1,5 @@
 import { useLocation, useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
 import ctownReduxLogo from "@/public/logos/ctown-redux.png";
 
 export default function CommandCenterBar() {
@@ -38,8 +37,7 @@ export default function CommandCenterBar() {
         className="h-7 text-xs px-3 gap-1.5"
         onClick={() => navigate("/draft")}
       >
-        <Icon icon="layout-grid" className="h-3 w-3" />
-        Draft Room
+        🏈 Draft Room
       </Button>
 
       {/* Right side — Settings */}
@@ -51,7 +49,7 @@ export default function CommandCenterBar() {
         className="h-7 text-xs px-2"
         onClick={() => navigate("/settings")}
       >
-        <Icon icon="settings" className="h-3.5 w-3.5" />
+        ⚙️
       </Button>
     </div>
   );

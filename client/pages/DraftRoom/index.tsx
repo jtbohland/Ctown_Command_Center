@@ -5,7 +5,6 @@ import { queryClient } from "@superblocksteam/library";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { Icon } from "@/components/ui/icon";
 import {
   Select,
   SelectContent,
@@ -30,6 +29,8 @@ import DraftDayTradeModal from "@/components/draft/DraftDayTradeModal";
 import DraftCelebration from "@/components/draft/DraftCelebration";
 import DraftCapitalView from "@/components/draft/DraftCapitalView";
 import type { TagKey, Player } from "@/lib/draft-constants";
+import { getTeamEmoji } from "@/lib/draft-constants";
+import seasonXxLogo from "@/public/logos/season-xx.png";
 
 // ─── Constants ──────────────────────────────────────────────
 const CURRENT_DRAFT_YEAR = 2026;
@@ -95,7 +96,6 @@ export default function DraftRoom() {
   const isDraftComplete = useMemo(() => picks.length > 0 && picks.every((p) => p.is_complete), [picks]);
 
   // ── Is this year's draft completed? ───────────────────────
-  const isCompletedYear = selectedYear === CURRENT_DRAFT_YEAR && isDraftComplete;
   const isFutureYear = selectedYear > CURRENT_DRAFT_YEAR;
   const isLiveYear = selectedYear === CURRENT_DRAFT_YEAR && !isDraftComplete;
 
@@ -180,6 +180,7 @@ export default function DraftRoom() {
   // ── CSV upload handler (for Draft Room year-scoped uploads) ─
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadMode, setUploadMode] = useState<"players" | "dynasty" | "rookie">("players");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -198,6 +199,7 @@ export default function DraftRoom() {
         toast.success(msg);
       }
       setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       await queryClient.invalidateQueries("GetPlayers");
     } catch (error) {
       const message = error && typeof error === "object" && "message" in error ? String((error as { message: unknown }).message) : String(error);
@@ -206,6 +208,19 @@ export default function DraftRoom() {
   }, [selectedFile, uploadPlayers, uploadMode]);
 
   const keeperCount = useMemo(() => players.filter((p) => p.is_keeper).length, [players]);
+
+  // ── Build future-year draft tracker from draft capital ────
+  const futurePicksByRound = useMemo(() => {
+    if (!isFutureYear) return new Map<number, typeof draftCapital>();
+    const filtered = draftCapital.filter((dc) => dc.year === selectedYear);
+    const byRound = new Map<number, typeof draftCapital>();
+    for (const dc of filtered) {
+      const arr = byRound.get(dc.round) ?? [];
+      arr.push(dc);
+      byRound.set(dc.round, arr);
+    }
+    return byRound;
+  }, [draftCapital, selectedYear, isFutureYear]);
 
   // ── Loading ──────────────────────────────────────────────
   if (playersLoading || teamsLoading || picksLoading) {
@@ -224,51 +239,114 @@ export default function DraftRoom() {
   }
 
   // ─────────────────────────────────────────────────────────
-  // FUTURE YEAR — Draft Banks + Order only, locked features
+  // FUTURE YEAR — Same layout as current year, but empty +
+  // draft tracker showing pick ownership from draft capital
   // ─────────────────────────────────────────────────────────
   if (isFutureYear) {
+    const totalRounds = 11;
+    const roundNumbers = Array.from({ length: totalRounds }, (_, i) => i + 1);
+
     return (
       <div className="flex flex-col h-full bg-background overflow-hidden">
-        <DraftRoomHeader
-          selectedYear={selectedYear}
-          onYearChange={setSelectedYear}
-        />
-        <div className="flex-1 overflow-auto px-5 py-4">
-          {/* Draft Banks + Order for the future year */}
-          <DraftCapitalView
-            draftCapital={draftCapital}
-            teams={teams}
-            draftPicks2026={selectedYear === CURRENT_DRAFT_YEAR ? (picksData?.picks ?? []).map((p: any) => ({
-              round: p.round, pick_in_round: p.pick_in_round, overall_pick: p.overall_pick,
-              team_id: p.team_id, team_name: p.team_name, manager_name: p.manager_name ?? "",
-              player_id: p.player_id, is_complete: p.is_complete,
-            })) : undefined}
-          />
+        {/* Compact Header */}
+        <DraftRoomHeader selectedYear={selectedYear} onYearChange={setSelectedYear} />
 
-          {/* Locked features */}
-          <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { label: "Draft Board", icon: "layout-grid" as const, emoji: "🏈" },
-              { label: "Recap", icon: "chart-column-big" as const, emoji: "📊" },
-              { label: "Post-Draft Grades", icon: "award" as const, emoji: "🎓" },
-              { label: "Mock Draft", icon: "shuffle" as const, emoji: "🔮" },
-            ].map((item) => (
-              <div
-                key={item.label}
-                className="flex flex-col items-center justify-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-4 py-6 opacity-50"
-              >
-                <span className="text-2xl">🔒</span>
-                <span className="text-xs font-medium text-muted-foreground">{item.emoji} {item.label}</span>
-                <span className="text-[10px] text-muted-foreground/60">Unlocks pre-season {selectedYear}</span>
-              </div>
-            ))}
+        {/* View Tabs (disabled for future) */}
+        <div className="flex items-center gap-1 px-4 py-1.5 border-b border-border bg-card/50">
+          <Button variant="secondary" size="sm" className="h-7 text-xs px-3">🏈 Draft Board</Button>
+          <Button variant="ghost" size="sm" className="h-7 text-xs px-3 opacity-40 cursor-not-allowed">👥 All Rosters</Button>
+          <Button variant="ghost" size="sm" className="h-7 text-xs px-3 opacity-40 cursor-not-allowed">📊 Recap</Button>
+          <Button variant="ghost" size="sm" className="h-7 text-xs px-3 opacity-40 cursor-not-allowed">🔮 Mock Draft</Button>
+          <div className="flex-1" />
+          <span className="text-[10px] text-muted-foreground/60">Unlocks pre-season {selectedYear}</span>
+        </div>
+
+        {/* Board + Tracker layout */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Empty board area */}
+          <div className="flex-1 overflow-auto p-5">
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <span className="text-5xl mb-4 opacity-40">🏈</span>
+              <h3 className="text-lg font-bold text-muted-foreground/60 mb-1">
+                {selectedYear} Draft Board
+              </h3>
+              <p className="text-xs text-muted-foreground/40 max-w-sm">
+                The draft board will populate once ADP rankings are uploaded for the {selectedYear} season.
+                Use the pick tracker on the right to see current pick ownership.
+              </p>
+            </div>
+
+            {/* Draft Capital banks below the empty board */}
+            <div className="mt-4">
+              <DraftCapitalView
+                draftCapital={draftCapital}
+                teams={teams}
+              />
+            </div>
           </div>
 
-          {/* CSV uploads locked for future years */}
-          <div className="mt-4 rounded-lg border border-border/50 bg-muted/10 px-4 py-3">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>🔒</span>
-              <span>ADP, Dynasty, and Rookie CSV uploads will be available when Draft Room {selectedYear} is unlocked</span>
+          {/* Pick Tracker — populated from draft capital */}
+          <div className="w-[320px] border-l border-border overflow-auto shrink-0 bg-card/30">
+            <div className="px-3 py-2 border-b border-border/50 sticky top-0 bg-card/80 backdrop-blur-sm z-10">
+              <div className="text-xs font-bold">📋 {selectedYear} Pick Tracker</div>
+              <div className="text-[10px] text-muted-foreground">
+                {futurePicksByRound.size > 0
+                  ? `${Array.from(futurePicksByRound.values()).reduce((s, arr) => s + arr.length, 0)} picks across ${futurePicksByRound.size} rounds`
+                  : "No draft capital data for this year"}
+              </div>
+            </div>
+            <div className="p-2 space-y-3">
+              {roundNumbers.map((round) => {
+                const roundPicks = futurePicksByRound.get(round) ?? [];
+                if (roundPicks.length === 0) return null;
+                return (
+                  <div key={round}>
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1 mb-1">
+                      Round {round}
+                    </div>
+                    <div className="space-y-0.5">
+                      {roundPicks.map((dc) => {
+                        const owner = teams.find((t) => t.id === dc.current_team_id);
+                        const original = teams.find((t) => t.id === dc.original_team_id);
+                        const isTraded = dc.current_team_id !== dc.original_team_id;
+                        const isMine = owner?.is_my_team;
+                        return (
+                          <div
+                            key={dc.id}
+                            className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md text-sm ${
+                              isMine ? "bg-primary/10 border border-primary/30" : ""
+                            }`}
+                          >
+                            <span className="text-[10px] font-mono text-muted-foreground w-5 text-right shrink-0">
+                              {round}.
+                            </span>
+                            {owner && (
+                              <span
+                                className="w-2.5 h-2.5 rounded-full shrink-0 ring-1 ring-white/10"
+                                style={{ backgroundColor: owner.color }}
+                              />
+                            )}
+                            <span className={`text-xs flex-1 truncate ${isMine ? "font-bold text-primary" : ""}`}>
+                              {owner ? `${getTeamEmoji(owner.team_name)} ${owner.team_name}` : "TBD"}
+                            </span>
+                            {isTraded && original && (
+                              <span className="text-[9px] text-amber-400 shrink-0">
+                                via {getTeamEmoji(original.team_name)} {original.team_name.split(" ")[0]}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+              {futurePicksByRound.size === 0 && (
+                <div className="flex flex-col items-center py-8 text-center">
+                  <span className="text-2xl mb-2 opacity-30">📋</span>
+                  <p className="text-xs text-muted-foreground/50">No pick data yet for {selectedYear}</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -281,13 +359,10 @@ export default function DraftRoom() {
   // ─────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full bg-background overflow-hidden">
-      {/* Draft Room Header with year selector */}
-      <DraftRoomHeader
-        selectedYear={selectedYear}
-        onYearChange={setSelectedYear}
-      />
+      {/* Compact Header with year selector */}
+      <DraftRoomHeader selectedYear={selectedYear} onYearChange={setSelectedYear} />
 
-      {/* Status Bar (only for current draft year) */}
+      {/* Status Bar */}
       {selectedYear === CURRENT_DRAFT_YEAR && (
         <DraftStatusBar picks={picks} teams={teams} players={players} />
       )}
@@ -295,52 +370,63 @@ export default function DraftRoom() {
       {/* View Toggle Strip */}
       <div className="flex items-center gap-1 px-4 py-1.5 border-b border-border bg-card/50">
         <Button variant={draftView === "board" ? "secondary" : "ghost"} size="sm" className="h-7 text-xs px-3" onClick={() => setDraftView("board")}>
-          <Icon icon="layout-grid" className="h-3 w-3 mr-1.5" />
-          Draft Board
+          🏈 Draft Board
         </Button>
         <Button variant={draftView === "rosters" ? "secondary" : "ghost"} size="sm" className="h-7 text-xs px-3" onClick={() => setDraftView("rosters")}>
-          <Icon icon="users" className="h-3 w-3 mr-1.5" />
-          All Rosters
+          👥 All Rosters
         </Button>
         <Button variant={draftView === "recap" ? "secondary" : "ghost"} size="sm" className="h-7 text-xs px-3" onClick={() => setDraftView("recap")}>
-          <Icon icon="chart-column-big" className="h-3 w-3 mr-1.5" />
-          Recap
+          📊 Recap
         </Button>
         <Button variant={draftView === "mock" ? "secondary" : "ghost"} size="sm" className="h-7 text-xs px-3" onClick={() => setDraftView("mock")}>
-          <Icon icon="shuffle" className="h-3 w-3 mr-1.5" />
-          Mock Draft
+          🔮 Mock Draft
         </Button>
 
-        <div className="flex-1" />
+        <div className="w-px h-5 bg-border/50 mx-1" />
 
-        {/* CSV upload buttons — current draft year */}
+        {/* CSV upload — clean inline bar */}
         {draftView === "board" && (
-          <div className="flex items-center gap-1 mr-3">
+          <div className="flex items-center gap-1.5">
             {(["players", "dynasty", "rookie"] as const).map((mode) => (
               <Button
                 key={mode}
                 variant={uploadMode === mode ? "secondary" : "ghost"}
                 size="sm"
-                className="h-6 text-[10px] px-2"
-                onClick={() => setUploadMode(mode)}
+                className="h-7 text-xs px-2.5"
+                onClick={() => {
+                  setUploadMode(mode);
+                  setSelectedFile(null);
+                  if (fileInputRef.current) fileInputRef.current.value = "";
+                }}
               >
                 {mode === "players" ? "📋 ADP" : mode === "dynasty" ? "👑 Dynasty" : "🍼 Rookie"}
               </Button>
             ))}
-            <label className="cursor-pointer">
-              <input type="file" accept=".csv" onChange={handleFileChange} className="hidden" />
-              <span className="inline-flex items-center h-6 px-2 text-[10px] rounded-md bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer">
-                <Icon icon="upload" className="h-3 w-3 mr-1" />
-                {selectedFile ? selectedFile.name.slice(0, 20) : "Choose CSV"}
-              </span>
-            </label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleFileChange}
+              className="hidden"
+              id="draft-csv-upload"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs px-3"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              📂 {selectedFile ? selectedFile.name.slice(0, 20) : "Choose CSV"}
+            </Button>
             {selectedFile && (
-              <Button size="sm" className="h-6 text-[10px] px-2" onClick={handleUpload} disabled={uploading}>
-                {uploading ? "..." : "Upload"}
+              <Button size="sm" className="h-7 text-xs px-3" onClick={handleUpload} disabled={uploading}>
+                {uploading ? "Uploading…" : "⬆️ Upload"}
               </Button>
             )}
           </div>
         )}
+
+        <div className="flex-1" />
 
         {/* Pick Timer */}
         {draftView === "board" && isLiveYear && (
@@ -356,16 +442,16 @@ export default function DraftRoom() {
         {draftView === "board" && (
           <div className="flex items-center gap-1">
             <Button variant={sidePanel === "tracker" ? "secondary" : "ghost"} size="sm" className="h-7 text-xs px-2" onClick={() => setSidePanel("tracker")}>
-              <Icon icon="list-ordered" className="h-3 w-3 mr-1" /> Tracker
+              📋 Tracker
             </Button>
             <Button variant={sidePanel === "watchlist" ? "secondary" : "ghost"} size="sm" className="h-7 text-xs px-2" onClick={() => setSidePanel("watchlist")}>
-              <Icon icon="eye" className="h-3 w-3 mr-1" /> Watchlist
+              👁️ Watchlist
             </Button>
             <Button variant={sidePanel === "rivals" ? "secondary" : "ghost"} size="sm" className="h-7 text-xs px-2" onClick={() => setSidePanel("rivals")}>
-              <Icon icon="swords" className="h-3 w-3 mr-1" /> Rivals
+              ⚔️ Rivals
             </Button>
             <Button variant={sidePanel === "roster" ? "secondary" : "ghost"} size="sm" className="h-7 text-xs px-2" onClick={() => setSidePanel("roster")}>
-              <Icon icon="user" className="h-3 w-3 mr-1" /> My Roster
+              🏠 My Roster
             </Button>
           </div>
         )}
@@ -424,16 +510,15 @@ export default function DraftRoom() {
   );
 }
 
-// ─── Draft Room Header ──────────────────────────────────────
+// ─── Compact Draft Room Header ──────────────────────────────
+// Uses league logo + "Season XX · Est. 2006" — no duplicate branding
 function DraftRoomHeader({ selectedYear, onYearChange }: { selectedYear: number; onYearChange: (y: number) => void }) {
   return (
-    <div className="flex items-center gap-3 px-5 py-2.5 border-b border-border bg-gradient-to-r from-emerald-950/30 via-card/60 to-amber-950/30">
-      <span className="text-2xl">🏈</span>
+    <div className="flex items-center gap-3 px-5 py-2 border-b border-border bg-card">
+      <img src={seasonXxLogo} alt="Season XX" className="w-8 h-8 rounded-lg object-contain" />
       <div className="flex-1">
-        <h2 className="text-lg font-extrabold tracking-tight">Draft Room</h2>
-        <span className="text-[10px] text-muted-foreground">
-          Year-by-year draft boards, recaps, grades & mock drafts
-        </span>
+        <div className="text-sm font-bold leading-none">Draft Room</div>
+        <div className="text-[10px] text-muted-foreground mt-0.5">Season XX · Est. 2006</div>
       </div>
       <Select value={String(selectedYear)} onValueChange={(v) => onYearChange(Number(v))}>
         <SelectTrigger className="h-8 w-28 text-xs">
@@ -442,7 +527,7 @@ function DraftRoomHeader({ selectedYear, onYearChange }: { selectedYear: number;
         <SelectContent>
           {YEARS.map((y) => (
             <SelectItem key={y} value={String(y)}>
-              {y} {y === CURRENT_DRAFT_YEAR ? "✓" : y > CURRENT_DRAFT_YEAR ? "🔒" : ""}
+              {y} {y === CURRENT_DRAFT_YEAR ? "✓" : ""}
             </SelectItem>
           ))}
         </SelectContent>
