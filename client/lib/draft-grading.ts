@@ -97,8 +97,8 @@ export function rankMedal(rank: number): string {
 
 export function classificationEmoji(c: PickClassification): string {
   switch (c) {
-    case "steal": return "🎯";
-    case "right": return "✅";
+    case "steal": return "💸";
+    case "right": return "🎯";
     case "reach": return "📉";
     case "positional_waste": return "🗑️";
   }
@@ -107,7 +107,7 @@ export function classificationEmoji(c: PickClassification): string {
 export function classificationLabel(c: PickClassification): string {
   switch (c) {
     case "steal": return "Steal";
-    case "right": return "Right Pick";
+    case "right": return "Perfect";
     case "reach": return "Reach";
     case "positional_waste": return "Pos. Waste";
   }

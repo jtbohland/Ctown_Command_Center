@@ -1,4 +1,4 @@
-import { memo, useCallback } from "react";
+import { memo, useCallback, useState, useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import PositionBadge from "./PositionBadge";
 import TagSelector from "./TagSelector";
@@ -12,12 +12,15 @@ type PlayerRowProps = {
   player: Player;
   onDraft: (playerId: number) => void;
   onToggleTag: (playerId: number, tag: TagKey) => void;
+  onRemove?: (playerId: number) => void;
   isHighlighted?: boolean;
   compact?: boolean;
   boardPosition?: number; // 1-indexed position on the sorted board
+  currentOverallPick?: number; // current pick number for verdict calculation
+  keeperCount?: number; // number of keepers (for ADP offset)
 };
 
-const PlayerRow = memo(function PlayerRow({ player, onDraft, onToggleTag, isHighlighted, compact, boardPosition }: PlayerRowProps) {
+const PlayerRow = memo(function PlayerRow({ player, onDraft, onToggleTag, onRemove, isHighlighted, compact, boardPosition, currentOverallPick, keeperCount = 0 }: PlayerRowProps) {
   const tags = player.tags ? player.tags.split(",") : [];
 
   const handleToggleTag = useCallback(
@@ -29,7 +32,34 @@ const PlayerRow = memo(function PlayerRow({ player, onDraft, onToggleTag, isHigh
 
   const handleDraft = useCallback(() => {
     onDraft(player.id);
-  }, [player.id, onDraft]);
+    // Compute verdict and show floating pill
+    if (currentOverallPick != null && player.adp_rank != null) {
+      const effectivePick = currentOverallPick + keeperCount;
+      const gap = effectivePick - player.adp_rank; // positive = player fell past ADP (steal), negative = reached
+      let verdict: "steal" | "perfect" | "reach";
+      if (gap >= 8) verdict = "steal";
+      else if (gap <= -8) verdict = "reach";
+      else verdict = "perfect";
+      setVerdictPill(verdict);
+    }
+  }, [player.id, player.adp_rank, onDraft, currentOverallPick, keeperCount]);
+
+  const handleRemove = useCallback(() => {
+    onRemove?.(player.id);
+  }, [player.id, onRemove]);
+
+  // ─── Verdict Pill State ──────────────────────────────
+  const [verdictPill, setVerdictPill] = useState<"steal" | "perfect" | "reach" | null>(null);
+  const pillTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const draftBtnRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (verdictPill) {
+      clearTimeout(pillTimerRef.current);
+      pillTimerRef.current = setTimeout(() => setVerdictPill(null), 2200);
+    }
+    return () => clearTimeout(pillTimerRef.current);
+  }, [verdictPill]);
 
   const sosScore = getPlayerSos(player.nfl_team, player.position);
   const upsideScore = parseRatingString(player.upside);
@@ -130,20 +160,50 @@ const PlayerRow = memo(function PlayerRow({ player, onDraft, onToggleTag, isHigh
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 relative">
+        {onRemove && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
+            onClick={handleRemove}
+            title="Remove from board"
+          >
+            <Icon icon="x" className="h-3.5 w-3.5" />
+          </Button>
+        )}
         <TagSelector currentTags={tags} onToggleTag={handleToggleTag}>
           <Button variant="ghost" size="icon" className="h-7 w-7">
             <Icon icon="tags" className="h-3.5 w-3.5" />
           </Button>
         </TagSelector>
-        <Button
-          variant="default"
-          size="sm"
-          className="h-7 text-xs px-2"
-          onClick={handleDraft}
-        >
-          Draft
-        </Button>
+        <div className="relative">
+          <Button
+            ref={draftBtnRef}
+            variant="default"
+            size="sm"
+            className="h-7 text-xs px-2"
+            onClick={handleDraft}
+          >
+            Draft
+          </Button>
+          {/* Floating Verdict Pill */}
+          {verdictPill && (
+            <span
+              className={cn(
+                "absolute left-1/2 -translate-x-1/2 bottom-full mb-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-bold shadow-lg pointer-events-none z-50",
+                "animate-verdict-pill",
+                verdictPill === "steal" && "bg-green-500/90 text-white",
+                verdictPill === "perfect" && "bg-blue-500/90 text-white",
+                verdictPill === "reach" && "bg-red-500/90 text-white",
+              )}
+            >
+              {verdictPill === "steal" && "💸 Steal"}
+              {verdictPill === "perfect" && "🎯 Perfect"}
+              {verdictPill === "reach" && "📉 Reach"}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -149,6 +149,24 @@ export default function WarRoom() {
     [toggleTag],
   );
 
+  const handleRemovePlayer = useCallback(
+    async (playerId: number) => {
+      try {
+        await toggleTag({ playerId, tag: "removed" });
+        await queryClient.invalidateQueries("GetPlayers");
+      } catch (error) {
+        const message =
+          error && typeof error === "object" && "message" in error
+            ? String((error as { message: unknown }).message)
+            : String(error);
+        toast.error("Remove failed: " + message);
+      }
+    },
+    [toggleTag],
+  );
+
+  const keeperCount = useMemo(() => players.filter((p) => p.is_keeper).length, [players]);
+
   const handleInitDb = useCallback(async () => {
     try {
       const result = await initDb({});
@@ -401,8 +419,11 @@ export default function WarRoom() {
                 players={players}
                 onDraft={handleDraft}
                 onToggleTag={handleToggleTag}
+                onRemove={handleRemovePlayer}
                 onWriteInCreated={handleWriteInCreated}
                 onTradeAlert={() => setTradeModalOpen(true)}
+                currentOverallPick={currentPick?.overall_pick ?? 1}
+                keeperCount={keeperCount}
               />
             </div>
 
