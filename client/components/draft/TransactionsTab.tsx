@@ -10,7 +10,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ui/icon";
 import PositionBadge from "@/components/draft/PositionBadge";
+import WaiverUploader from "@/components/settings/WaiverUploader";
 
 // Season options: 2026-27 through 2034-35
 const SEASON_OPTIONS = Array.from({ length: 9 }, (_, i) => {
@@ -116,6 +119,9 @@ export default function TransactionsTab({ teams }: Props) {
 
   return (
     <div className="space-y-4">
+      {/* Upload Section */}
+      <WaiverUploadSection />
+
       {/* Header + Filters */}
       <div className="flex items-center gap-4 flex-wrap">
         <div className="flex items-center gap-2">
@@ -174,7 +180,7 @@ export default function TransactionsTab({ teams }: Props) {
           <span className="text-4xl mb-3 block">📇</span>
           <p className="text-sm text-muted-foreground">No transactions for {season}</p>
           <p className="text-xs text-muted-foreground mt-1">
-            Upload Sleeper screenshots in Settings → Waiver Wire Transactions
+            Upload Sleeper screenshots using the upload button above
           </p>
         </div>
       ) : (
@@ -207,6 +213,27 @@ export default function TransactionsTab({ teams }: Props) {
   );
 }
 
+/** Collapsible waiver upload section */
+function WaiverUploadSection() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border border-border rounded-lg overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-accent/40 transition-colors"
+      >
+        <Icon icon="upload" className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-xs font-semibold">Upload Waiver Wire Screenshots</span>
+        <Icon icon={open ? "chevron-up" : "chevron-down"} className="h-3.5 w-3.5 text-muted-foreground ml-auto" />
+      </button>
+      {open && (
+        <div className="border-t border-border">
+          <WaiverUploader />
+        </div>
+      )}
+    </div>
+  );
+}
 /** Single transaction row — Sleeper-style layout */
 function TransactionRow({ txn }: { txn: Transaction }) {
   const addedVal = adpValue(txn.added_player_adp_rank);
