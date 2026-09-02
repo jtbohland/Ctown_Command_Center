@@ -144,7 +144,7 @@ export default api({
       { name: "Teal Titans", manager: "Erik", color: "#00B4A0", isMyTeam: false, pos: 8 },
       { name: "The McCartel", manager: "Jimmy", color: "#C7345B", isMyTeam: false, pos: 9 },
       { name: "The Smith Football Team", manager: "Chuck", color: "#6B7B82", isMyTeam: false, pos: 10 },
-      { name: "You Know 12 Out Here!", manager: "Jordan", color: "#1A1A4E", isMyTeam: false, pos: 11 },
+      { name: "You Know 12 Out Here!", manager: "Jordan", color: "#1E3A8A", isMyTeam: false, pos: 11 },
     ];
 
     // Batch team insert (1 query instead of 11)

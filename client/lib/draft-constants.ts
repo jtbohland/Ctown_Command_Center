@@ -512,5 +512,5 @@ export const TEAMS_DATA = [
   { name: "Teal Titans", manager: "Erik", color: "#00B4A0" },
   { name: "The McCartel", manager: "Jimmy", color: "#C7345B" },
   { name: "The Smith Football Team", manager: "Chuck", color: "#6B7B82" },
-  { name: "You Know 12 Out Here!", manager: "Jordan", color: "#1A1A4E" },
+  { name: "You Know 12 Out Here!", manager: "Jordan", color: "#1E3A8A" },
 ] as const;
