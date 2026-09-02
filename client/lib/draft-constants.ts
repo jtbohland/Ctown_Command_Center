@@ -130,7 +130,7 @@ export const TEAM_EMOJIS: Record<string, string> = {
   "Rat Pack": "🐀",
   "Gym": "🏋🏻‍♂️",
   "McCartel": "🪇",
-  "You Know": "🕛",
+  "You Know": "🚔",
   "Teal": "🚙",
 };
 
