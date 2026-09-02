@@ -161,17 +161,6 @@ const PlayerRow = memo(function PlayerRow({ player, onDraft, onToggleTag, onRemo
 
       {/* Actions */}
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 relative">
-        {onRemove && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
-            onClick={handleRemove}
-            title="Remove from board"
-          >
-            <Icon icon="x" className="h-3.5 w-3.5" />
-          </Button>
-        )}
         <TagSelector currentTags={tags} onToggleTag={handleToggleTag}>
           <Button variant="ghost" size="icon" className="h-7 w-7">
             <Icon icon="tags" className="h-3.5 w-3.5" />
@@ -204,6 +193,17 @@ const PlayerRow = memo(function PlayerRow({ player, onDraft, onToggleTag, onRemo
             </span>
           )}
         </div>
+        {onRemove && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
+            onClick={handleRemove}
+            title="Remove from board"
+          >
+            <Icon icon="x" className="h-3.5 w-3.5" />
+          </Button>
+        )}
       </div>
     </div>
   );
