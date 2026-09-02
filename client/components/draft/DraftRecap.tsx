@@ -184,7 +184,7 @@ const TeamRecapCard = memo(function TeamRecapCard({
           💸 {tg.stealCount} steal{tg.stealCount !== 1 ? "s" : ""}
         </span>
         <span className="text-red-400 font-semibold">
-          📉 {tg.reachCount} reach{tg.reachCount !== 1 ? "es" : ""}
+          📈 {tg.reachCount} reach{tg.reachCount !== 1 ? "es" : ""}
         </span>
         {tg.wasteCount > 0 && (
           <span className="text-orange-400 font-semibold">
@@ -225,7 +225,7 @@ const TeamRecapCard = memo(function TeamRecapCard({
         )}
         {tg.biggestReach && (
           <div className="text-[10px]">
-            <span className="text-red-400 font-semibold">📉 Biggest reach:</span>{" "}
+            <span className="text-red-400 font-semibold">📈 Biggest reach:</span>{" "}
             <span className="text-foreground">{tg.biggestReach.player.name}</span>{" "}
             <PositionBadge position={tg.biggestReach.player.position} />{" "}
             <span className="text-muted-foreground">
@@ -472,7 +472,7 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
           <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
             <p>💸 <strong className="text-green-400">Steal</strong> — Took a top-3 available RB/WR at their position</p>
             <p>🎯 <strong className="text-blue-400">Perfect Pick</strong> — Solid value, top-7 available RB/WR</p>
-            <p>📉 <strong className="text-red-400">Reach</strong> — Passed on clearly better RB/WR (receipts shown)</p>
+            <p>📈 <strong className="text-red-400">Reach</strong> — Passed on clearly better RB/WR (receipts shown)</p>
             <p>🗑️ <strong className="text-orange-400">Pos. Waste</strong> — 2nd QB/TE when quality RB/WR was on board</p>
           </div>
           <p>
@@ -489,7 +489,7 @@ const DraftRecap = memo(function DraftRecap({ players, teams, picks }: DraftReca
           <div className="grid grid-cols-4 gap-3">
             {([
               { title: "💸 Biggest Steals", items: superlatives.steals, color: "green" },
-              { title: "📉 Biggest Reaches", items: superlatives.reaches, color: "red" },
+              { title: "📈 Biggest Reaches", items: superlatives.reaches, color: "red" },
               { title: "🎯 Perfect Picks", items: superlatives.perfect, color: "blue" },
             ] as const).map(({ title, items, color }) => (
               <div

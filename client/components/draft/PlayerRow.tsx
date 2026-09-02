@@ -200,7 +200,7 @@ const PlayerRow = memo(function PlayerRow({ player, onDraft, onToggleTag, onRemo
             >
               {verdictPill === "steal" && "💸 Steal"}
               {verdictPill === "perfect" && "🎯 Perfect"}
-              {verdictPill === "reach" && "📉 Reach"}
+              {verdictPill === "reach" && "📈 Reach"}
             </span>
           )}
         </div>
