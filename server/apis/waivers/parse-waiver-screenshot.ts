@@ -93,7 +93,20 @@ export default api({
 
     ctx.log.info("Parsing waiver screenshot", { fileName: file.name, season });
 
-    // ── 2. Call Gemini vision ──
+    // ── 2. Load teams first (needed for the Gemini prompt) ──
+    const allTeams = await ctx.integrations.apps_db.query(
+      "SELECT id, team_name, manager_name FROM ffwr_teams LIMIT 20",
+      TeamSchema,
+      undefined,
+      { label: "Load teams for Gemini prompt + matching" },
+    );
+
+    // ── 3. Call Gemini vision ──
+    // Build the team/manager mapping dynamically from the DB data
+    const teamMappingLines = allTeams
+      .map((t) => `- Team "${t.team_name}" → manager_name: "${t.manager_name}"`)
+      .join("\n");
+
     const systemPrompt = `You are a fantasy football transaction parser. You are analyzing a screenshot from the Sleeper fantasy football app showing waiver wire / free agent transactions.
 
 Extract EVERY transaction visible in the screenshot. Each transaction typically shows:
@@ -102,7 +115,13 @@ Extract EVERY transaction visible in the screenshot. Each transaction typically 
 - A dropped player (red "-" or "Dropped" indicator) with their NFL team abbreviation and position
 - A date and optionally a time
 
-IMPORTANT name mappings for this league's managers:
+CRITICAL — Team Name to Manager Mapping:
+The Sleeper app shows TEAM NAMES next to each transaction. You MUST map them to the correct manager_name using ONLY this exact mapping:
+${teamMappingLines}
+
+IMPORTANT: Some team names look similar (e.g. "Gym Rats" vs "Rat Pack"). You must use the EXACT team name shown in the screenshot and map it to the correct manager. Do NOT confuse teams with similar-sounding names.
+
+Additional name mappings if you see a person's name instead of a team name:
 - "Bohland" or "JT" = "JT"
 - "Tyler" or "Ty" = "Tyler"
 - "Brooke" = "Brooke"  
@@ -123,7 +142,7 @@ Return ONLY a valid JSON array. Each element must have:
   "dropped_player_name": "Full Name" or null,
   "dropped_player_position": "QB"|"RB"|"WR"|"TE"|"K"|"DEF" or null,
   "dropped_player_nfl_team": "NFL Team Abbreviation" or null,
-  "manager_name": "Manager first name from list above",
+  "manager_name": "Manager first name from mapping above — NOT the team name",
   "transaction_date": "YYYY-MM-DD",
   "transaction_time": "HH:MM AM/PM" or null
 }
@@ -190,21 +209,13 @@ Return ONLY the JSON array — no markdown, no explanation.`;
 
     ctx.log.info(`Gemini extracted ${parsed.length} transactions`);
 
-    // ── 3. Load player pool + teams for matching ──
-    const [allPlayers, allTeams] = await Promise.all([
-      ctx.integrations.apps_db.query(
-        "SELECT id, name, position, nfl_team FROM ffwr_players LIMIT 2000",
-        DbPlayerSchema,
-        undefined,
-        { label: "Load player pool for matching" },
-      ),
-      ctx.integrations.apps_db.query(
-        "SELECT id, team_name, manager_name FROM ffwr_teams LIMIT 20",
-        TeamSchema,
-        undefined,
-        { label: "Load teams for matching" },
-      ),
-    ]);
+    // ── 4. Load player pool for matching ──
+    const allPlayers = await ctx.integrations.apps_db.query(
+      "SELECT id, name, position, nfl_team FROM ffwr_players LIMIT 2000",
+      DbPlayerSchema,
+      undefined,
+      { label: "Load player pool for matching" },
+    );
 
     // Build lookup maps
     const playerByNorm = new Map<string, z.infer<typeof DbPlayerSchema>>();
@@ -219,7 +230,7 @@ Return ONLY the JSON array — no markdown, no explanation.`;
       teamByName.set(t.team_name.toLowerCase(), t);
     }
 
-    // ── 4. Check existing hashes for dedup ──
+    // ── 5. Check existing hashes for dedup ──
     const ExistingHashSchema = z.object({ dedup_hash: z.string() });
     const existingRows = await ctx.integrations.apps_db.query(
       "SELECT dedup_hash FROM ffwr_waiver_transactions WHERE season = $1 LIMIT 10000",
@@ -229,7 +240,7 @@ Return ONLY the JSON array — no markdown, no explanation.`;
     );
     const existingHashes = new Set(existingRows.map((r) => r.dedup_hash));
 
-    // ── 5. Enrich each transaction ──
+    // ── 6. Enrich each transaction ──
     const enriched: z.infer<typeof EnrichedTransactionSchema>[] = [];
 
     for (const txn of parsed) {
@@ -261,54 +272,30 @@ Return ONLY the JSON array — no markdown, no explanation.`;
         }
       }
 
-      // Match team — try manager name first, then fall back to team name matching
+      // Match team — EXACT match only (no fuzzy/substring matching).
+      // Fuzzy matching previously confused similar names like "Gym Rats" / "Rat Pack".
       let teamId: number | null = null;
       let teamMatched = false;
       const managerKey = txn.manager_name.toLowerCase().trim();
+
+      // 1. Exact manager name match
       let teamMatch = teamByManager.get(managerKey);
 
+      // 2. Exact team name match (Gemini often extracts Sleeper team names instead of manager names)
       if (!teamMatch) {
-        // Exact team name match (Gemini often extracts Sleeper team names instead of manager names)
         teamMatch = teamByName.get(managerKey) ?? undefined;
-      }
-
-      if (!teamMatch) {
-        // Fuzzy: check if extracted name is contained in a team name or vice-versa
-        for (const [tName, team] of teamByName) {
-          if (tName.includes(managerKey) || managerKey.includes(tName)) {
-            teamMatch = team;
-            break;
-          }
-        }
-      }
-
-      if (!teamMatch) {
-        // Keyword match: any significant word (>3 chars) from the extracted name appears in a team name
-        const words = managerKey.split(/\s+/);
-        for (const [tName, team] of teamByName) {
-          if (words.some((w) => w.length > 3 && tName.includes(w))) {
-            teamMatch = team;
-            break;
-          }
-        }
-      }
-
-      if (!teamMatch) {
-        // Reverse keyword: any significant word from a team name appears in the extracted name
-        for (const [tName, team] of teamByName) {
-          const teamWords = tName.split(/\s+/);
-          if (teamWords.some((w) => w.length > 3 && managerKey.includes(w))) {
-            teamMatch = team;
-            break;
-          }
-        }
       }
 
       if (teamMatch) {
         teamId = teamMatch.id;
         teamMatched = true;
       } else {
-        warnings.push(`Manager "${txn.manager_name}" not matched to a team`);
+        // No fuzzy fallback — flag for manual review instead of guessing
+        warnings.push(
+          `⚠️ Team NOT matched: "${txn.manager_name}" did not exactly match any manager or team name. ` +
+          `Available teams: ${allTeams.map((t) => `${t.manager_name} (${t.team_name})`).join(", ")}. ` +
+          `This transaction will be skipped unless you correct the team assignment.`
+        );
       }
 
       // Compute dedup hash
