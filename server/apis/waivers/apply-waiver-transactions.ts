@@ -55,13 +55,40 @@ export default api({
       throw new Error("No transactions to apply. Parse a waiver screenshot first.");
     }
 
+    // ── Sort transactions chronologically (oldest-first) ──
+    // Screenshots show newest-first, but we must apply oldest-first so that
+    // the most recent transaction wins when the same player is added/dropped
+    // multiple times. Parse "HH:MM AM/PM" into sortable minutes-since-midnight.
+    const parseTime = (t: string | null): number => {
+      if (!t) return 0;
+      const m = t.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+      if (!m) return 0;
+      let h = parseInt(m[1], 10);
+      const min = parseInt(m[2], 10);
+      const ampm = m[3].toUpperCase();
+      if (ampm === "AM" && h === 12) h = 0;
+      if (ampm === "PM" && h !== 12) h += 12;
+      return h * 60 + min;
+    };
+
+    const sorted = [...transactions].sort((a, b) => {
+      // Primary: date ascending (oldest first)
+      const da = new Date(a.transaction_date).getTime();
+      const db = new Date(b.transaction_date).getTime();
+      if (da !== db) return da - db;
+      // Secondary: time ascending (earliest first)
+      return parseTime(a.transaction_time) - parseTime(b.transaction_time);
+    });
+
+    ctx.log.info(`Sorted ${sorted.length} transactions chronologically (oldest-first)`);
+
     let applied = 0;
     let skippedDuplicates = 0;
     let playersCreated = 0;
     let rosterChanges = 0;
     const errors: string[] = [];
 
-    for (const txn of transactions) {
+    for (const txn of sorted) {
       // Skip duplicates
       if (txn.is_duplicate) {
         skippedDuplicates++;
