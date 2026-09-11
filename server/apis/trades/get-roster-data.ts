@@ -37,7 +37,11 @@ const CountSchema = z.object({ cnt: z.coerce.number() });
 
 /** Normalize player name for fuzzy matching between tables */
 function normalizeName(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/\b(jr|sr|ii|iii|iv)\b/g, "").trim();
+  return name
+    .toLowerCase()
+    .replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/g, "") // strip suffixes BEFORE removing non-alpha
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
 }
 
 export default api({
