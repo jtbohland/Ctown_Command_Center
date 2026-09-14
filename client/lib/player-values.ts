@@ -34,15 +34,21 @@ export function computePlayerValue(
 
 /**
  * Build positional label from position + positional_rank.
- * e.g. "QB1", "RB12", "WR3"
+ * e.g. "QB1", "RB12", "WR3", or "DNP" when rank is -1.
  */
 export function getPositionalLabel(
   position: string | null | undefined,
   positionalRank: number | null | undefined,
 ): string {
   if (!position) return "";
+  if (positionalRank === -1) return "DNP";
   if (positionalRank == null) return position;
   return `${position}${positionalRank}`;
+}
+
+/** Check if a player is DNP (positional_rank === -1) */
+export function isDnp(positionalRank: number | null | undefined): boolean {
+  return positionalRank === -1;
 }
 
 /**

@@ -236,6 +236,9 @@ export default api({
     const totalTeams = allTeamIds.length || 11;
 
     // 4. Compute current team values
+    // DNP rank: players not in actuals get last-place rank (worse than anyone who played)
+    const dnpRank = actualsMap.size > 0 ? actualsMap.size + 1 : MAX_ADP;
+
     function computeTeamValue(teamId: number, weekWeight: number): number {
       const players = teamPlayers.get(teamId) ?? [];
       let totalValue = 0;
@@ -248,14 +251,18 @@ export default api({
         const baselineAdpRank = exchangeRank ?? player.adp_rank;
         const baselineValue = computePlayerValue(baselineAdpRank, player.dynasty_rank);
 
-        if (weekWeight === 0 || !actualsMap.has(nameNorm)) {
-          // Preseason or no actuals for this player → pure ADP+Dynasty blend
+        if (weekWeight === 0) {
+          // Preseason → pure ADP+Dynasty blend
           totalValue += baselineValue;
-        } else {
-          // Blended: baseline × (1 - weight) + actuals_value × weight
+        } else if (actualsMap.has(nameNorm)) {
+          // In-season, player has actuals → blended formula
           const actuals = actualsMap.get(nameNorm)!;
-          // Normalize actuals rank to 0-100 scale (like ADP value)
           const actualsValue = computePlayerValue(actuals.overall_rank);
+          totalValue += baselineValue * (1 - weekWeight) + actualsValue * weekWeight;
+        } else {
+          // In-season, player NOT in actuals → DNP penalty
+          // Treat as last place (0 actuals value), so value = baseline × (1 - weight)
+          const actualsValue = computePlayerValue(dnpRank);
           totalValue += baselineValue * (1 - weekWeight) + actualsValue * weekWeight;
         }
       }
