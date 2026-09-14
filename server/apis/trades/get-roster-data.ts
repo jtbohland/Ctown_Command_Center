@@ -32,6 +32,15 @@ const ExchangeAdpSchema = z.object({
   adp_rank: z.coerce.number(),
 });
 
+const ActualsRankSchema = z.object({
+  player_name: z.string(),
+  position: z.string(),
+  positional_rank: z.coerce.number(),
+  overall_rank: z.coerce.number(),
+});
+
+const WeekCheckSchema = z.object({ week_num: z.coerce.number() });
+
 const ColCheckSchema = z.object({ exists: z.coerce.boolean() });
 const CountSchema = z.object({ cnt: z.coerce.number() });
 
@@ -52,14 +61,19 @@ export default api({
     apps_db: postgres(APPS_DB),
   },
 
-  input: z.object({}),
+  input: z.object({
+    season: z.string().optional(),
+  }),
 
   output: z.object({
     rosterPlayers: z.array(RosterPlayerSchema),
     draftPicks2026: z.array(DraftPickCapitalSchema),
+    hasActuals: z.boolean(),
+    lastCompletedWeek: z.number(),
   }),
 
-  async run(ctx) {
+  async run(ctx, { season: seasonInput }) {
+    const season = seasonInput ?? "2026-27";
     // ── 1. Load Exchange ADP (latest uploaded sheet) ──────────
     let exchangeAdp: z.infer<typeof ExchangeAdpSchema>[] = [];
     try {
@@ -102,6 +116,66 @@ export default api({
       posRankMap.get(pos)!.set(row.adp_rank, posCounts.get(pos)!);
     }
 
+    // ── 1b. Load actuals-based positional ranks if season data exists ──
+    let hasActuals = false;
+    let lastCompletedWeek = 0;
+    const actualsRankMap = new Map<string, { positional_rank: number; overall_rank: number }>();
+
+    try {
+      const weekChecks = await ctx.integrations.apps_db.query(
+        `SELECT unnest(ARRAY[
+          CASE WHEN SUM(CASE WHEN week_1 IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 1 ELSE 0 END,
+          CASE WHEN SUM(CASE WHEN week_2 IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 2 ELSE 0 END,
+          CASE WHEN SUM(CASE WHEN week_3 IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 3 ELSE 0 END,
+          CASE WHEN SUM(CASE WHEN week_4 IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 4 ELSE 0 END,
+          CASE WHEN SUM(CASE WHEN week_5 IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 5 ELSE 0 END,
+          CASE WHEN SUM(CASE WHEN week_6 IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 6 ELSE 0 END,
+          CASE WHEN SUM(CASE WHEN week_7 IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 7 ELSE 0 END,
+          CASE WHEN SUM(CASE WHEN week_8 IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 8 ELSE 0 END,
+          CASE WHEN SUM(CASE WHEN week_9 IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 9 ELSE 0 END,
+          CASE WHEN SUM(CASE WHEN week_10 IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 10 ELSE 0 END,
+          CASE WHEN SUM(CASE WHEN week_11 IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 11 ELSE 0 END,
+          CASE WHEN SUM(CASE WHEN week_12 IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 12 ELSE 0 END,
+          CASE WHEN SUM(CASE WHEN week_13 IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 13 ELSE 0 END,
+          CASE WHEN SUM(CASE WHEN week_14 IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 14 ELSE 0 END,
+          CASE WHEN SUM(CASE WHEN week_15 IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 15 ELSE 0 END,
+          CASE WHEN SUM(CASE WHEN week_16 IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 16 ELSE 0 END,
+          CASE WHEN SUM(CASE WHEN week_17 IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 17 ELSE 0 END
+        ]) AS week_num
+        FROM ffwr_season_actuals
+        WHERE season = $1`,
+        WeekCheckSchema,
+        [season],
+        { label: "Check which weeks have actuals" },
+      );
+      for (const row of weekChecks) {
+        if (row.week_num > lastCompletedWeek) lastCompletedWeek = row.week_num;
+      }
+      hasActuals = lastCompletedWeek > 0;
+
+      if (hasActuals) {
+        const actualsRows = await ctx.integrations.apps_db.query(
+          `SELECT player_name, position, positional_rank, overall_rank
+           FROM ffwr_season_actuals
+           WHERE season = $1
+           ORDER BY overall_rank
+           LIMIT 600`,
+          ActualsRankSchema,
+          [season],
+          { label: "Load actuals positional ranks" },
+        );
+        for (const row of actualsRows) {
+          actualsRankMap.set(normalizeName(row.player_name), {
+            positional_rank: row.positional_rank,
+            overall_rank: row.overall_rank,
+          });
+        }
+        ctx.log.info(`Loaded ${actualsRows.length} actuals ranks for ${season} (week ${lastCompletedWeek})`);
+      }
+    } catch {
+      // No actuals table yet
+    }
+
     // ── 2. Check if roster_team_id column exists ─────────────
     const [{ exists: colExists }] = await ctx.integrations.apps_db.query(
       `SELECT EXISTS (
@@ -136,22 +210,28 @@ export default api({
         { label: "Fetch all rostered + drafted players" },
       );
 
-      // Override ADP + positional rank from Exchange ADP when available
-      if (exchangeAdp.length > 0) {
-        rosterPlayers = rawPlayers.map((p) => {
-          const nameNorm = normalizeName(p.name);
-          const exchangeRank = exchangeAdpMap.get(nameNorm);
-          if (exchangeRank != null) {
-            // Use Exchange ADP rank and compute positional rank from it
-            const posMap = posRankMap.get(p.position);
-            const posRank = posMap?.get(exchangeRank) ?? p.positional_rank;
-            return { ...p, adp_rank: exchangeRank, positional_rank: posRank };
+      // Override ADP from Exchange ADP + positional rank from actuals (or ADP fallback)
+      rosterPlayers = rawPlayers.map((p) => {
+        const nameNorm = normalizeName(p.name);
+
+        // ADP: prefer Exchange ADP, fall back to draft ADP
+        const exchangeRank = exchangeAdpMap.get(nameNorm);
+        const adpRank = exchangeRank ?? p.adp_rank;
+
+        // Positional rank: prefer actuals when season has started, fall back to ADP-based
+        let posRank = p.positional_rank;
+        if (hasActuals) {
+          const actualsData = actualsRankMap.get(nameNorm);
+          if (actualsData) {
+            posRank = actualsData.positional_rank;
           }
-          return p;
-        });
-      } else {
-        rosterPlayers = rawPlayers;
-      }
+        } else if (exchangeRank != null) {
+          const posMap = posRankMap.get(p.position);
+          posRank = posMap?.get(exchangeRank) ?? p.positional_rank;
+        }
+
+        return { ...p, adp_rank: adpRank, positional_rank: posRank };
+      });
     }
 
     // ── 3. Fetch 2026 draft picks for Treasury ───────────────
@@ -168,6 +248,6 @@ export default api({
       { label: "Fetch 2026 draft picks for Treasury" },
     );
 
-    return { rosterPlayers, draftPicks2026 };
+    return { rosterPlayers, draftPicks2026, hasActuals, lastCompletedWeek };
   },
 });

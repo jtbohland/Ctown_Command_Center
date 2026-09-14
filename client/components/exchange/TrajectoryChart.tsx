@@ -249,12 +249,32 @@ const TrajectoryChart = memo(function TrajectoryChart({
 
   // ─── In-season: line chart (one line per team) ─────────────
 
+  // Compute tight Y-axis domain so team lines spread visibly
+  const yDomain = useMemo(() => {
+    let min = Infinity;
+    let max = -Infinity;
+    for (const point of trajectory) {
+      for (const key of Object.keys(point)) {
+        if (!key.startsWith("team_")) continue;
+        const v = point[key] as number;
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+    }
+    const spread = max - min;
+    const padding = Math.max(spread * 0.15, 10);
+    return [
+      Math.floor((min - padding) / 10) * 10,
+      Math.ceil((max + padding) / 10) * 10,
+    ] as [number, number];
+  }, [trajectory]);
+
   return (
     <div className="w-full">
       <div className="text-xs font-semibold text-muted-foreground mb-2">
         📈 Team Value Trajectory
       </div>
-      <ResponsiveContainer width="100%" height={280}>
+      <ResponsiveContainer width="100%" height={320}>
         <LineChart data={trajectory} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} />
           <XAxis
@@ -267,7 +287,9 @@ const TrajectoryChart = memo(function TrajectoryChart({
             tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
             tickLine={false}
             axisLine={false}
-            width={45}
+            width={50}
+            domain={yDomain}
+            tickFormatter={(v: number) => v.toFixed(0)}
           />
           <Tooltip content={<CustomTooltip />} />
           {teamKeys.map(({ dataKey, color, name }) => (
