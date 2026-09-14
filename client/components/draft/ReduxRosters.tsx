@@ -124,13 +124,18 @@ const TeamRosterCard = memo(function TeamRosterCard({
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {grade && (
-            <Badge
-              variant="outline"
-              className={`text-[10px] px-1.5 font-bold border ${gradeBgClass(grade.grade as LetterGrade)}`}
-              title={`#${grade.rank} · Value: ${grade.totalValue.toFixed(1)}`}
-            >
-              {grade.grade}
-            </Badge>
+            <>
+              <Badge
+                variant="outline"
+                className={`text-[10px] px-1.5 font-bold border ${gradeBgClass(grade.grade as LetterGrade)}`}
+                title={`#${grade.rank} · Value: ${grade.totalValue.toFixed(1)}`}
+              >
+                {grade.grade}
+              </Badge>
+              <span className="text-[10px] font-mono font-semibold text-muted-foreground" title="Total roster value">
+                {grade.totalValue.toFixed(1)}
+              </span>
+            </>
           )}
           <Badge variant="secondary" className="text-[10px] px-1.5">
             {players.length} players
