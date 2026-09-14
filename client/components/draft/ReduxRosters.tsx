@@ -17,7 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { getTeamEmoji, POSITION_BG_CLASSES } from "@/lib/draft-constants";
-import { formatPlayerValueLabel } from "@/lib/player-values";
+import { formatPlayerValueLabel, isDnp } from "@/lib/player-values";
 import ActualsUploader from "@/components/settings/ActualsUploader";
 import { gradeBgClass } from "@/lib/roster-grade-spec";
 import type { LetterGrade } from "@/lib/roster-grade-spec";
@@ -64,8 +64,9 @@ const ColumnHeader = memo(function ColumnHeader() {
 });
 
 const PlayerRow = memo(function PlayerRow({ player }: { player: RosterPlayer }) {
+  const dnp = isDnp(player.positional_rank);
   return (
-    <div className="flex items-center gap-2 px-2 py-1 rounded text-xs hover:bg-muted/30">
+    <div className={`flex items-center gap-2 px-2 py-1 rounded text-xs hover:bg-muted/30 ${dnp ? "opacity-45" : ""}`}>
       <span className={`text-[10px] font-bold w-7 text-center rounded px-1 py-0.5 ${POSITION_BG_CLASSES[player.position] ?? "bg-muted"}`}>
         {player.position}
       </span>
@@ -74,7 +75,7 @@ const PlayerRow = memo(function PlayerRow({ player }: { player: RosterPlayer }) 
         {player.is_keeper && <span className="text-amber-400 ml-1 text-[10px]">🔒</span>}
       </span>
       <span className="text-[10px] text-muted-foreground w-8 text-right">{player.nfl_team || ""}</span>
-      <span className="text-[10px] text-muted-foreground w-[88px] text-right font-mono tabular-nums">
+      <span className={`text-[10px] w-[88px] text-right font-mono tabular-nums ${dnp ? "text-red-400/70" : "text-muted-foreground"}`}>
         {formatPlayerValueLabel(player.adp_rank, player.position, player.positional_rank)}
       </span>
     </div>

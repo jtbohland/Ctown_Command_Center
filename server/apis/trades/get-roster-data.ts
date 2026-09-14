@@ -219,11 +219,14 @@ export default api({
         const adpRank = exchangeRank ?? p.adp_rank;
 
         // Positional rank: prefer actuals when season has started, fall back to ADP-based
+        // -1 = DNP sentinel (player not in actuals during active season)
         let posRank = p.positional_rank;
         if (hasActuals) {
           const actualsData = actualsRankMap.get(nameNorm);
           if (actualsData) {
             posRank = actualsData.positional_rank;
+          } else {
+            posRank = -1; // DNP — not in actuals data
           }
         } else if (exchangeRank != null) {
           const posMap = posRankMap.get(p.position);
