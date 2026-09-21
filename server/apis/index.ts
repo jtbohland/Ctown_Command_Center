@@ -55,6 +55,7 @@ import BackupTables from './settings/backup-tables.js';
 import InitExchangeAdp from './exchange/init-exchange-adp.js';
 import SeedExchangeAdp from './exchange/seed-exchange-adp.js';
 import GetRosterGrades from './exchange/get-roster-grades.js';
+import IngestActualsText from './trades/ingest-actuals-text.js';
 
 
 const apis = {
@@ -112,6 +113,7 @@ const apis = {
   InitExchangeAdp,
   SeedExchangeAdp,
   GetRosterGrades,
+  IngestActualsText,
 } as const;
 
 export default apis;

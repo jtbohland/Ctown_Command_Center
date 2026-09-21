@@ -86,6 +86,7 @@ export default api({
     validationIssues: z.array(ValidationIssueSchema),
     sampleRows: z.array(SampleRowSchema),
     inserted: z.number(),
+    weeksDetected: z.number(),
     seasonAlreadyLoaded: z.boolean(),
     existingRowCount: z.number(),
     message: z.string(),
@@ -240,9 +241,10 @@ export default api({
         validationIssues,
         sampleRows,
         inserted: 0,
+        weeksDetected: numWeeks,
         seasonAlreadyLoaded,
         existingRowCount,
-        message: `Preview: ${rows.length} players parsed for ${season}. ${skippedKDst} K/DST skipped. ${validationIssues.length} issues. Ready to seed.`,
+        message: `Preview: ${rows.length} players parsed for ${season} (${numWeeks} week columns detected). ${skippedKDst} K/DST skipped. ${validationIssues.length} issues. Ready to seed.`,
       };
     }
 
@@ -335,9 +337,10 @@ export default api({
       validationIssues,
       sampleRows,
       inserted: totalInserted,
+      weeksDetected: numWeeks,
       seasonAlreadyLoaded,
       existingRowCount,
-      message: `Seeded ${totalInserted} players for season ${season} (skipped ${skippedKDst} K/DST).`,
+      message: `Seeded ${totalInserted} players for season ${season} with ${numWeeks} weeks of data (skipped ${skippedKDst} K/DST).`,
     };
   },
 });
