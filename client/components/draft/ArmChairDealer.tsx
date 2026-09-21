@@ -20,12 +20,12 @@ export default function ArmChairDealer() {
   // Fetch 2026 draft picks for Treasury (from draft board, not draft_capital)
   const { data: rosterData, refetch: refetchRosters } = useApiData("GetRosterData", {});
 
-  // Build a blended-value lookup from roster data so Deal Desk shows current values
-  const blendedValueMap = useMemo(() => {
-    const map = new Map<string, number>();
+  // Build a blended-value + rank lookup from roster data so Deal Desk shows current values
+  const blendedPlayerMap = useMemo(() => {
+    const map = new Map<string, { blended_value: number; positional_rank: number | null }>();
     if (!rosterData?.rosterPlayers) return map;
-    for (const p of rosterData.rosterPlayers as Array<{ name: string; blended_value: number }>) {
-      map.set(p.name.toLowerCase(), p.blended_value);
+    for (const p of rosterData.rosterPlayers as Array<{ name: string; blended_value: number; positional_rank: number | null }>) {
+      map.set(p.name.toLowerCase(), { blended_value: p.blended_value, positional_rank: p.positional_rank });
     }
     return map;
   }, [rosterData]);
@@ -113,7 +113,7 @@ export default function ArmChairDealer() {
         </div>
 
         <TabsContent value="builder" className="flex-1 overflow-auto px-5 py-4">
-          <TradeBuilder players={players} teams={teams} draftCapital={draftCapital} draftPicks2026={rosterData?.draftPicks2026 ?? []} blendedValueMap={blendedValueMap} />
+          <TradeBuilder players={players} teams={teams} draftCapital={draftCapital} draftPicks2026={rosterData?.draftPicks2026 ?? []} blendedPlayerMap={blendedPlayerMap} />
         </TabsContent>
 
         <TabsContent value="history" className="flex-1 overflow-auto px-5 py-4">
@@ -125,7 +125,7 @@ export default function ArmChairDealer() {
         </TabsContent>
 
         <TabsContent value="siren" className="flex-1 overflow-auto px-5 py-4">
-          <SirenSale teams={teams} players={players} draftCapital={draftCapital} draftPicks2026={rosterData?.draftPicks2026 ?? []} onSaved={handleTradeSaved} blendedValueMap={blendedValueMap} />
+          <SirenSale teams={teams} players={players} draftCapital={draftCapital} draftPicks2026={rosterData?.draftPicks2026 ?? []} onSaved={handleTradeSaved} blendedPlayerMap={blendedPlayerMap} />
         </TabsContent>
 
         <TabsContent value="capital" className="flex-1 overflow-auto px-5 py-4">
