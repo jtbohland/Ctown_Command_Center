@@ -37,10 +37,10 @@ interface Props {
   draftCapital: DraftCapitalRow[];
   draftPicks2026: DraftPick2026[];
   onSaved: () => void;
-  blendedValueMap?: Map<string, number>;
+  blendedPlayerMap?: Map<string, { blended_value: number; positional_rank: number | null }>;
 }
 
-export default function SirenSale({ teams, players, draftCapital, draftPicks2026, onSaved, blendedValueMap }: Props) {
+export default function SirenSale({ teams, players, draftCapital, draftPicks2026, onSaved, blendedPlayerMap }: Props) {
   const [teamAId, setTeamAId] = useState<number | null>(null);
   const [teamBId, setTeamBId] = useState<number | null>(null);
   const [teamCId, setTeamCId] = useState<number | null>(null);
@@ -413,7 +413,7 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
           showRecipient={wildCardEnabled}
           recipientOptions={teamAId ? getRecipientOptions(teamAId) : []}
           onSetRecipient={(idx, rid) => setRecipient("A", idx, rid)}
-          blendedValueMap={blendedValueMap}
+          blendedPlayerMap={blendedPlayerMap}
         />
         <AssetPanel
           label={teamB ? `${getTeamEmoji(teamB.team_name)} ${teamB.team_name} sends` : "Side B sends"}
@@ -430,7 +430,7 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
           showRecipient={wildCardEnabled}
           recipientOptions={teamBId ? getRecipientOptions(teamBId) : []}
           onSetRecipient={(idx, rid) => setRecipient("B", idx, rid)}
-          blendedValueMap={blendedValueMap}
+          blendedPlayerMap={blendedPlayerMap}
         />
         {wildCardEnabled && (
           <AssetPanel
@@ -448,7 +448,7 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
             showRecipient={wildCardEnabled}
             recipientOptions={teamCId ? getRecipientOptions(teamCId) : []}
             onSetRecipient={(idx, rid) => setRecipient("C", idx, rid)}
-            blendedValueMap={blendedValueMap}
+            blendedPlayerMap={blendedPlayerMap}
           />
         )}
       </div>
@@ -551,7 +551,7 @@ function AssetPanel({
   showRecipient,
   recipientOptions,
   onSetRecipient,
-  blendedValueMap,
+  blendedPlayerMap,
 }: {
   label: string;
   assets: Asset[];
@@ -567,9 +567,20 @@ function AssetPanel({
   showRecipient: boolean;
   recipientOptions: { id: number; label: string }[];
   onSetRecipient: (idx: number, recipientTeamId: number) => void;
-  blendedValueMap?: Map<string, number>;
+  blendedPlayerMap?: Map<string, { blended_value: number; positional_rank: number | null }>;
 }) {
   const isLocked = !teamId;
+
+  // Build dropdown label with blended data when available
+  function playerLabel(p: PlayerRow): string {
+    const entry = blendedPlayerMap?.get(p.name.toLowerCase());
+    if (entry) {
+      const rank = entry.positional_rank;
+      const posLabel = rank === -1 ? "DNP" : `${p.position}${rank ?? ""}`;
+      return `${p.name} (${posLabel} · ${entry.blended_value.toFixed(1)})`;
+    }
+    return formatDropdownLabel(p.name, p.position, p.adp_rank, p.positional_rank);
+  }
 
   // Filter players to those on the selected team's roster
   const rosterFilteredPlayers = useMemo(() => {
@@ -620,7 +631,7 @@ function AssetPanel({
             <span className="text-[10px] font-mono text-muted-foreground shrink-0">
               ({Math.round(
                 a.type === "player"
-                  ? (() => { const p = players.find((p) => p.name === a.playerName); const bv = blendedValueMap && a.playerName ? blendedValueMap.get(a.playerName.toLowerCase()) : undefined; return bv ?? (p?.adp_rank ? calcPlayerValue(p.adp_rank) : 0); })()
+                  ? (() => { const p = players.find((p) => p.name === a.playerName); const entry = blendedPlayerMap && a.playerName ? blendedPlayerMap.get(a.playerName.toLowerCase()) : undefined; return entry?.blended_value ?? (p?.adp_rank ? calcPlayerValue(p.adp_rank) : 0); })()
                   : calcPickValue(a.pickRound ?? 6, a.pickYear ?? 2026, a.pickNumber ?? undefined)
               ).toLocaleString()})
             </span>
@@ -662,7 +673,7 @@ function AssetPanel({
               <SelectLabel className="text-[10px] font-bold text-emerald-400 tracking-wider">🏠 ON ROSTER</SelectLabel>
               {rosterFilteredPlayers.map((p) => (
                 <SelectItem key={p.id} value={p.id.toString()} className="border-l-2 border-emerald-500/60 pl-3">
-                  {formatDropdownLabel(p.name, p.position, p.adp_rank, p.positional_rank)}
+                  {playerLabel(p)}
                 </SelectItem>
               ))}
             </SelectGroup>
@@ -677,7 +688,7 @@ function AssetPanel({
               <SelectLabel className="text-[10px] font-bold text-zinc-400 tracking-wider">📋 AVAILABLE PLAYERS</SelectLabel>
               {availablePoolPlayers.map((p) => (
                 <SelectItem key={`pool-${p.id}`} value={p.id.toString()}>
-                  {formatDropdownLabel(p.name, p.position, p.adp_rank, p.positional_rank)}
+                  {playerLabel(p)}
                 </SelectItem>
               ))}
             </SelectGroup>
