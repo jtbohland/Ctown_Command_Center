@@ -109,8 +109,9 @@ export default function ActualsUploader() {
       if (result) {
         setPreviewData(result as PreviewData);
         setSeedComplete(true);
+        const r = result as PreviewData;
         toast.success(
-          `Seeded ${(result as PreviewData).inserted} players for ${(result as PreviewData).season}`,
+          `Seeded ${r.inserted} players for ${r.season}${(r as any).weeksDetected ? ` (${(r as any).weeksDetected} weeks)` : ""}`,
         );
         await queryClient.invalidateQueries("GetLoadedActualSeasons");
       }

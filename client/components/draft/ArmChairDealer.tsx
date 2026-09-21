@@ -20,6 +20,16 @@ export default function ArmChairDealer() {
   // Fetch 2026 draft picks for Treasury (from draft board, not draft_capital)
   const { data: rosterData, refetch: refetchRosters } = useApiData("GetRosterData", {});
 
+  // Build a blended-value lookup from roster data so Deal Desk shows current values
+  const blendedValueMap = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!rosterData?.rosterPlayers) return map;
+    for (const p of rosterData.rosterPlayers as Array<{ name: string; blended_value: number }>) {
+      map.set(p.name.toLowerCase(), p.blended_value);
+    }
+    return map;
+  }, [rosterData]);
+
   const handleTradeSaved = useCallback(() => {
     refetch();        // Ledger, Verdicts, Treasury capital
     refetchRosters(); // Treasury draft board, Redux Rosters
@@ -103,7 +113,7 @@ export default function ArmChairDealer() {
         </div>
 
         <TabsContent value="builder" className="flex-1 overflow-auto px-5 py-4">
-          <TradeBuilder players={players} teams={teams} draftCapital={draftCapital} draftPicks2026={rosterData?.draftPicks2026 ?? []} />
+          <TradeBuilder players={players} teams={teams} draftCapital={draftCapital} draftPicks2026={rosterData?.draftPicks2026 ?? []} blendedValueMap={blendedValueMap} />
         </TabsContent>
 
         <TabsContent value="history" className="flex-1 overflow-auto px-5 py-4">
@@ -115,7 +125,7 @@ export default function ArmChairDealer() {
         </TabsContent>
 
         <TabsContent value="siren" className="flex-1 overflow-auto px-5 py-4">
-          <SirenSale teams={teams} players={players} draftCapital={draftCapital} draftPicks2026={rosterData?.draftPicks2026 ?? []} onSaved={handleTradeSaved} />
+          <SirenSale teams={teams} players={players} draftCapital={draftCapital} draftPicks2026={rosterData?.draftPicks2026 ?? []} onSaved={handleTradeSaved} blendedValueMap={blendedValueMap} />
         </TabsContent>
 
         <TabsContent value="capital" className="flex-1 overflow-auto px-5 py-4">

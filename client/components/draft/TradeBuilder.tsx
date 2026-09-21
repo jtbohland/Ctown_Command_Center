@@ -44,9 +44,10 @@ interface Props {
   teams: Team[];
   draftCapital: DraftCapitalRow[];
   draftPicks2026: DraftPick2026[];
+  blendedValueMap?: Map<string, number>;
 }
 
-export default function TradeBuilder({ players, teams, draftCapital, draftPicks2026 }: Props) {
+export default function TradeBuilder({ players, teams, draftCapital, draftPicks2026, blendedValueMap }: Props) {
   const [teamAId, setTeamAId] = useState<number | null>(null);
   const [teamBId, setTeamBId] = useState<number | null>(null);
   const [teamCId, setTeamCId] = useState<number | null>(null);
@@ -199,9 +200,14 @@ export default function TradeBuilder({ players, teams, draftCapital, draftPicks2
       C: teamC?.team_name ?? "Wild Card",
     };
 
-    // Compute value per asset
+    // Compute value per asset — use blended value when available
     function assetValue(a: Asset): number {
       if (a.type === "player") {
+        // Look up blended value first (reflects actuals + ADP blend)
+        if (blendedValueMap && a.playerName) {
+          const bv = blendedValueMap.get(a.playerName.toLowerCase());
+          if (bv !== undefined) return bv;
+        }
         const adp = a.playerAdp ?? null;
         return adp ? calcPlayerValue(adp) : 0;
       }
@@ -389,6 +395,7 @@ export default function TradeBuilder({ players, teams, draftCapital, draftPicks2
           showRecipient={wildCardEnabled}
           sideLabels={sideLabels.filter((l) => l.side !== "A")}
           onSetRecipient={(idx, r) => handleSetRecipient("A", idx, r)}
+          blendedValueMap={blendedValueMap}
         />
         <TradeSidePanel
           side="B"
@@ -407,6 +414,7 @@ export default function TradeBuilder({ players, teams, draftCapital, draftPicks2
           showRecipient={wildCardEnabled}
           sideLabels={sideLabels.filter((l) => l.side !== "B")}
           onSetRecipient={(idx, r) => handleSetRecipient("B", idx, r)}
+          blendedValueMap={blendedValueMap}
         />
         {wildCardEnabled && (
           <TradeSidePanel
@@ -426,6 +434,7 @@ export default function TradeBuilder({ players, teams, draftCapital, draftPicks2
             showRecipient={wildCardEnabled}
             sideLabels={sideLabels.filter((l) => l.side !== "C")}
             onSetRecipient={(idx, r) => handleSetRecipient("C", idx, r)}
+            blendedValueMap={blendedValueMap}
           />
         )}
       </div>
@@ -557,6 +566,7 @@ interface SidePanelProps {
   showRecipient?: boolean;
   sideLabels?: { side: "A" | "B" | "C"; emoji: string; name: string }[];
   onSetRecipient?: (index: number, recipient: "A" | "B" | "C") => void;
+  blendedValueMap?: Map<string, number>;
 }
 
 function TradeSidePanel({
@@ -576,6 +586,7 @@ function TradeSidePanel({
   showRecipient,
   sideLabels,
   onSetRecipient,
+  blendedValueMap,
 }: SidePanelProps) {
   const isLocked = !teamId;
 
@@ -622,7 +633,9 @@ function TradeSidePanel({
             <span className="text-[10px] font-mono text-muted-foreground shrink-0">
               ({Math.round(
                 asset.type === "player"
-                  ? (asset.playerAdp ? calcPlayerValue(asset.playerAdp) : 0)
+                  ? (blendedValueMap && asset.playerName
+                      ? (blendedValueMap.get(asset.playerName.toLowerCase()) ?? (asset.playerAdp ? calcPlayerValue(asset.playerAdp) : 0))
+                      : (asset.playerAdp ? calcPlayerValue(asset.playerAdp) : 0))
                   : calcPickValue(asset.pickRound ?? 6, asset.pickYear ?? 2026, asset.pickNumber ?? undefined)
               ).toLocaleString()})
             </span>

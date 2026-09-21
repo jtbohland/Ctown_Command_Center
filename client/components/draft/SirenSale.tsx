@@ -37,9 +37,10 @@ interface Props {
   draftCapital: DraftCapitalRow[];
   draftPicks2026: DraftPick2026[];
   onSaved: () => void;
+  blendedValueMap?: Map<string, number>;
 }
 
-export default function SirenSale({ teams, players, draftCapital, draftPicks2026, onSaved }: Props) {
+export default function SirenSale({ teams, players, draftCapital, draftPicks2026, onSaved, blendedValueMap }: Props) {
   const [teamAId, setTeamAId] = useState<number | null>(null);
   const [teamBId, setTeamBId] = useState<number | null>(null);
   const [teamCId, setTeamCId] = useState<number | null>(null);
@@ -412,6 +413,7 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
           showRecipient={wildCardEnabled}
           recipientOptions={teamAId ? getRecipientOptions(teamAId) : []}
           onSetRecipient={(idx, rid) => setRecipient("A", idx, rid)}
+          blendedValueMap={blendedValueMap}
         />
         <AssetPanel
           label={teamB ? `${getTeamEmoji(teamB.team_name)} ${teamB.team_name} sends` : "Side B sends"}
@@ -428,6 +430,7 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
           showRecipient={wildCardEnabled}
           recipientOptions={teamBId ? getRecipientOptions(teamBId) : []}
           onSetRecipient={(idx, rid) => setRecipient("B", idx, rid)}
+          blendedValueMap={blendedValueMap}
         />
         {wildCardEnabled && (
           <AssetPanel
@@ -445,6 +448,7 @@ export default function SirenSale({ teams, players, draftCapital, draftPicks2026
             showRecipient={wildCardEnabled}
             recipientOptions={teamCId ? getRecipientOptions(teamCId) : []}
             onSetRecipient={(idx, rid) => setRecipient("C", idx, rid)}
+            blendedValueMap={blendedValueMap}
           />
         )}
       </div>
@@ -547,6 +551,7 @@ function AssetPanel({
   showRecipient,
   recipientOptions,
   onSetRecipient,
+  blendedValueMap,
 }: {
   label: string;
   assets: Asset[];
@@ -562,6 +567,7 @@ function AssetPanel({
   showRecipient: boolean;
   recipientOptions: { id: number; label: string }[];
   onSetRecipient: (idx: number, recipientTeamId: number) => void;
+  blendedValueMap?: Map<string, number>;
 }) {
   const isLocked = !teamId;
 
@@ -614,7 +620,7 @@ function AssetPanel({
             <span className="text-[10px] font-mono text-muted-foreground shrink-0">
               ({Math.round(
                 a.type === "player"
-                  ? (() => { const p = players.find((p) => p.name === a.playerName); return p?.adp_rank ? calcPlayerValue(p.adp_rank) : 0; })()
+                  ? (() => { const p = players.find((p) => p.name === a.playerName); const bv = blendedValueMap && a.playerName ? blendedValueMap.get(a.playerName.toLowerCase()) : undefined; return bv ?? (p?.adp_rank ? calcPlayerValue(p.adp_rank) : 0); })()
                   : calcPickValue(a.pickRound ?? 6, a.pickYear ?? 2026, a.pickNumber ?? undefined)
               ).toLocaleString()})
             </span>

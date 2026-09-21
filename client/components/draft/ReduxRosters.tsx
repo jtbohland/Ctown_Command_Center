@@ -192,6 +192,7 @@ export default function ReduxRosters({ teams }: Props) {
   const [showRedraftDialog, setShowRedraftDialog] = useState(false);
   const [showAdpUploader, setShowAdpUploader] = useState(false);
   const [showActualsUploader, setShowActualsUploader] = useState(false);
+  const [adpUnlocked, setAdpUnlocked] = useState(false);
 
   // Grade lookup: teamId → grade info
   const gradeByTeam = useMemo(() => {
@@ -330,10 +331,19 @@ export default function ReduxRosters({ teams }: Props) {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-7 text-xs gap-1"
-                onClick={() => setShowAdpUploader(true)}
+                className={`h-7 text-xs gap-1 ${gradesData?.hasExchangeAdp && !adpUnlocked ? "opacity-60" : ""}`}
+                onClick={() => {
+                  if (gradesData?.hasExchangeAdp && !adpUnlocked) {
+                    if (window.confirm("🔒 ADP is locked. Unlock to replace current ADP data?")) {
+                      setAdpUnlocked(true);
+                      setShowAdpUploader(true);
+                    }
+                  } else {
+                    setShowAdpUploader(true);
+                  }
+                }}
               >
-                📊 Current ADP
+                {gradesData?.hasExchangeAdp && !adpUnlocked ? "🔒" : "🔓"} Current ADP
               </Button>
               <Button
                 variant="outline"
@@ -382,6 +392,7 @@ export default function ReduxRosters({ teams }: Props) {
             open={showAdpUploader}
             onOpenChange={setShowAdpUploader}
             onSuccess={() => {
+              setAdpUnlocked(false);
               refetchGrades();
             }}
           />
