@@ -4,7 +4,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -242,7 +241,7 @@ export default function WaiverUploader() {
 
         {/* Preview step */}
         {step === "preview" && parsedTransactions.length > 0 && (
-          <div className="flex flex-col gap-3 max-h-[480px]">
+          <div className="flex flex-col gap-3">
             {/* Stats bar */}
             <div className="flex items-center gap-2 flex-wrap shrink-0">
               <Badge variant="secondary" className="text-[10px]">
@@ -273,8 +272,8 @@ export default function WaiverUploader() {
               </div>
             )}
 
-            {/* Transaction list — scrollable, fills available space */}
-            <ScrollArea className="min-h-0 flex-1 rounded-md border">
+            {/* Transaction list — fixed-height scroll so actions stay visible */}
+            <div className="max-h-[320px] overflow-y-auto rounded-md border">
               <div className="p-2 space-y-1">
                 {parsedTransactions.map((txn, i) => (
                   <div
@@ -332,7 +331,7 @@ export default function WaiverUploader() {
                   </div>
                 ))}
               </div>
-            </ScrollArea>
+            </div>
 
             {/* Actions — pinned at bottom */}
             <div className="flex items-center gap-2 shrink-0">
