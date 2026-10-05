@@ -40,6 +40,7 @@ interface RosterPlayer {
   adp_rank: number | null;
   positional_rank: number | null;
   blended_value: number;
+  overall_rank: number | null;
   roster_team_id: number | null;
   is_keeper: boolean;
   team_name: string | null;
@@ -52,32 +53,56 @@ interface Props {
 
 const POSITION_ORDER = ["QB", "RB", "WR", "TE"] as const;
 
+// Shared fixed column widths so headers + values line up exactly
+const COL = {
+  pos: "w-7",
+  team: "w-9",
+  posRank: "w-12",
+  overall: "w-12",
+  value: "w-11",
+} as const;
+
 // ─── Player Row ─────────────────────────────────────────────
 const ColumnHeader = memo(function ColumnHeader() {
   return (
-    <div className="flex items-center gap-2 px-2 py-0.5 text-[9px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/30 mb-0.5">
-      <span className="w-7 text-center">Pos</span>
-      <span className="flex-1">Player</span>
-      <span className="w-8 text-right">Team</span>
-      <span className="w-[88px] text-right">Rank · Value</span>
+    <div className="flex items-center gap-1.5 px-2 py-0.5 text-[9px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/30 mb-0.5">
+      <span className={`${COL.pos} text-center shrink-0`}>Pos</span>
+      <span className="flex-1 min-w-0">Player</span>
+      <span className={`${COL.team} text-center shrink-0`}>Team</span>
+      <span className={`${COL.posRank} text-center shrink-0`}>Pos. Rank</span>
+      <span className={`${COL.overall} text-center shrink-0`}>Overall</span>
+      <span className={`${COL.value} text-center shrink-0`}>Value</span>
     </div>
   );
 });
 
+function formatOverallRank(rank: number | null): string {
+  if (rank === -1) return "DNP";
+  if (rank == null) return "—";
+  return `#${rank}`;
+}
+
 const PlayerRow = memo(function PlayerRow({ player }: { player: RosterPlayer }) {
   const dnp = isDnp(player.positional_rank);
+  const statTone = dnp ? "text-red-400/70" : "text-muted-foreground";
   return (
-    <div className={`flex items-center gap-2 px-2 py-1 rounded text-xs hover:bg-muted/30 ${dnp ? "opacity-45" : ""}`}>
-      <span className={`text-[10px] font-bold w-7 text-center rounded px-1 py-0.5 ${POSITION_BG_CLASSES[player.position] ?? "bg-muted"}`}>
+    <div className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs hover:bg-muted/30 ${dnp ? "opacity-45" : ""}`}>
+      <span className={`text-[10px] font-bold ${COL.pos} shrink-0 text-center rounded px-1 py-0.5 ${POSITION_BG_CLASSES[player.position] ?? "bg-muted"}`}>
         {player.position}
       </span>
-      <span className="flex-1 truncate font-medium">
+      <span className="flex-1 min-w-0 truncate font-medium">
         {player.name}
         {player.is_keeper && <span className="text-amber-400 ml-1 text-[10px]">🔒</span>}
       </span>
-      <span className="text-[10px] text-muted-foreground w-8 text-right">{player.nfl_team || ""}</span>
-      <span className={`text-[10px] w-[88px] text-right font-mono tabular-nums ${dnp ? "text-red-400/70" : "text-muted-foreground"}`}>
-        {getPositionalLabel(player.position, player.positional_rank)} · {player.blended_value}
+      <span className={`text-[10px] text-muted-foreground ${COL.team} shrink-0 text-center`}>{player.nfl_team || ""}</span>
+      <span className={`text-[10px] ${COL.posRank} shrink-0 text-center font-mono tabular-nums ${statTone}`}>
+        {getPositionalLabel(player.position, player.positional_rank)}
+      </span>
+      <span className={`text-[10px] ${COL.overall} shrink-0 text-center font-mono tabular-nums ${statTone}`}>
+        {formatOverallRank(player.overall_rank)}
+      </span>
+      <span className={`text-[10px] ${COL.value} shrink-0 text-center font-mono tabular-nums font-semibold ${dnp ? "text-red-400/70" : "text-foreground/80"}`}>
+        {player.blended_value.toFixed(1)}
       </span>
     </div>
   );

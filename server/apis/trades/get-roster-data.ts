@@ -18,16 +18,24 @@ const RawPlayerSchema = z.object({
 
 const RosterPlayerSchema = RawPlayerSchema.omit({ dynasty_rank: true }).extend({
   blended_value: z.number(),
+  /** Overall rank from current actuals upload. null = preseason, -1 = DNP */
+  overall_rank: z.number().nullable(),
 });
 
 // ─── Value computation (mirrors GetRosterGrades logic) ───────
 const MAX_ADP = 500;
+/** Gentle star curve: value = 100 · e^(−(rank−1)/150). Rank 1=100, 50≈72, 100≈52, 200≈27, 300≈14 */
+const STAR_CURVE_K = 150;
+
+function rankToValue(rank: number): number {
+  return 100 * Math.exp(-(Math.min(rank, MAX_ADP) - 1) / STAR_CURVE_K);
+}
 
 function computePlayerValue(adpRank: number | null, dynastyRank?: number | null): number {
   if (adpRank == null || adpRank <= 0) return 0;
-  const adpVal = Math.round(((MAX_ADP - Math.min(adpRank, MAX_ADP) + 1) / MAX_ADP) * 100 * 10) / 10;
-  if (dynastyRank == null || dynastyRank <= 0) return adpVal;
-  const dynVal = Math.round(((MAX_ADP - Math.min(dynastyRank, MAX_ADP) + 1) / MAX_ADP) * 100 * 10) / 10;
+  const adpVal = rankToValue(adpRank);
+  if (dynastyRank == null || dynastyRank <= 0) return Math.round(adpVal * 10) / 10;
+  const dynVal = rankToValue(dynastyRank);
   return Math.round((0.60 * adpVal + 0.40 * dynVal) * 10) / 10;
 }
 
@@ -246,12 +254,15 @@ export default api({
         // Positional rank: prefer actuals when season has started, fall back to ADP-based
         // -1 = DNP sentinel (player not in actuals during active season)
         let posRank = p.positional_rank;
+        let overallRank: number | null = null;
         if (hasActuals) {
           const actualsData = actualsRankMap.get(nameNorm);
           if (actualsData) {
             posRank = actualsData.positional_rank;
+            overallRank = actualsData.overall_rank;
           } else {
             posRank = -1; // DNP — not in actuals data
+            overallRank = -1;
           }
         } else if (exchangeRank != null) {
           const posMap = posRankMap.get(p.position);
@@ -284,6 +295,7 @@ export default api({
           adp_rank: adpRank,
           positional_rank: posRank,
           blended_value: Math.round(blendedValue * 10) / 10,
+          overall_rank: overallRank,
           roster_team_id: p.roster_team_id,
           is_keeper: p.is_keeper,
           team_name: p.team_name,
