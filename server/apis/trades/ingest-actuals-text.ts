@@ -1,15 +1,10 @@
 import { api, z, postgres } from "@superblocksteam/sdk-api";
+import { parseFantasyProsPlayer as parsePlayer } from "../../lib/fantasypros-player.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
 const VALID_POSITIONS = new Set(["QB", "RB", "WR", "TE"]);
 const SKIP_POSITIONS = new Set(["K", "DST"]);
-
-function parsePlayer(raw: string): { name: string; team: string } {
-  const parts = raw.split(/\s{2,}/);
-  if (parts.length >= 2) return { name: parts[0].trim(), team: parts[parts.length - 1].trim() };
-  return { name: raw.trim(), team: "" };
-}
 
 function parseWeekScore(val: string): number | null {
   const t = val.trim();

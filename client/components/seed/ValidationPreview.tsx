@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import RosterMatchBanner, { type RosterMatch } from "@/components/seed/RosterMatchBanner";
 
 interface SampleRow {
   rank: number;
@@ -31,8 +32,11 @@ interface PreviewData {
   sampleRows: SampleRow[];
   seasonAlreadyLoaded: boolean;
   existingRowCount: number;
+  rosterMatch?: RosterMatch | null;
+  teamCodeMissing?: number;
   message: string;
 }
+
 
 interface Props {
   data: PreviewData;
@@ -65,6 +69,8 @@ export default function ValidationPreview({ data, selectedYear }: Props) {
           </p>
         </CardContent>
       </Card>
+
+      {data.rosterMatch && <RosterMatchBanner match={data.rosterMatch} />}
 
       {/* Already loaded warning */}
       {data.seasonAlreadyLoaded && (

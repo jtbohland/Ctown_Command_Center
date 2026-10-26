@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import ValidationPreview from "@/components/seed/ValidationPreview";
+import { MIN_ROSTER_MATCH_RATE, type RosterMatch } from "@/components/seed/RosterMatchBanner";
 import { toast } from "sonner";
 import { queryClient } from "@superblocksteam/library";
 
@@ -45,6 +46,8 @@ type PreviewData = {
   inserted: number;
   seasonAlreadyLoaded: boolean;
   existingRowCount: number;
+  rosterMatch: RosterMatch | null;
+  teamCodeMissing: number;
   message: string;
 };
 
@@ -135,7 +138,12 @@ export default function ActualsUploader() {
   }, []);
 
   const canPreview = !!selectedYear && !!selectedFile && !seedLoading;
-  const canSeed = !!previewData && !seedComplete && !seedLoading && previewData.validRows > 0;
+  const rosterMatchTooLow =
+    !!previewData?.rosterMatch &&
+    previewData.rosterMatch.total > 0 &&
+    previewData.rosterMatch.rate < MIN_ROSTER_MATCH_RATE;
+  const canSeed =
+    !!previewData && !seedComplete && !seedLoading && previewData.validRows > 0 && !rosterMatchTooLow;
 
   return (
     <Card>
