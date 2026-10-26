@@ -4,6 +4,20 @@ import { normalizeName } from "../../lib/normalize-trade-name.js";
 const GEMINI_ID = "9284363a-0a4f-4167-b9fb-8d8e83c589ed";
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
+/**
+ * Sleeper screenshots show month/day but usually no year, so Gemini guesses
+ * the year (often wrongly). Re-anchor the year to the selected season:
+ * for "2026-27", Jun–Dec → 2026, Jan–May → 2027.
+ */
+function anchorDateToSeason(date: string, season: string): string {
+  const m = date.match(/^\d{4}-(\d{2})-(\d{2})/);
+  const startYear = parseInt(season.slice(0, 4), 10);
+  if (!m || isNaN(startYear)) return date;
+  const month = parseInt(m[1], 10);
+  const year = month >= 6 ? startYear : startYear + 1;
+  return `${year}-${m[1]}-${m[2]}`;
+}
+
 // ─── Schemas ─────────────────────────────────────────────────
 
 const ParsedTransactionSchema = z.object({
@@ -208,6 +222,8 @@ Return ONLY the JSON array — no markdown, no explanation.`;
     }
 
     ctx.log.info(`Gemini extracted ${parsed.length} transactions`);
+
+    parsed = parsed.map((t) => ({ ...t, transaction_date: anchorDateToSeason(t.transaction_date, season) }));
 
     // ── 4. Load player pool for matching ──
     const allPlayers = await ctx.integrations.apps_db.query(

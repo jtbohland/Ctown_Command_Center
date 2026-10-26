@@ -1,20 +1,24 @@
 import { api, z, postgres, readableFileSchema } from "@superblocksteam/sdk-api";
 import { requireAdmin } from "../../lib/auth/require-admin.js";
+import { parseFantasyProsPlayer as parsePlayer } from "../../lib/fantasypros-player.js";
+import { CURRENT_SEASON } from "../../lib/valuation/valuation-spec.js";
 
 const APPS_DB = "c6e32cf4-ca66-42ae-aeb3-58c84ffae574";
 
+/** Minimum share of rostered players that must match the file before we replace current-season data. */
+const MIN_ROSTER_MATCH_RATE = 0.8;
+
 /**
- * Parse player name and NFL team from FantasyPros PPR leaderboard format.
- * Examples:
- *   "Christian McCaffrey   CAR" → { name: "Christian McCaffrey", team: "CAR" }
- *   "Patrick Mahomes II   KC"  → { name: "Patrick Mahomes II", team: "KC" }
+ * Same strict normalization GetRosterData / GetRosterGrades use to join
+ * rosters to actuals. Deliberately does NOT strip team codes, so a parser
+ * regression shows up here exactly as it would on the roster views.
  */
-function parsePlayer(raw: string): { name: string; team: string } {
-  const parts = raw.split(/\s{2,}/);
-  if (parts.length >= 2) {
-    return { name: parts[0].trim(), team: parts[parts.length - 1].trim() };
-  }
-  return { name: raw.trim(), team: "" };
+function rosterMatchKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/g, "")
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
 }
 
 /**
@@ -89,6 +93,15 @@ export default api({
     weeksDetected: z.number(),
     seasonAlreadyLoaded: z.boolean(),
     existingRowCount: z.number(),
+    rosterMatch: z
+      .object({
+        matched: z.number(),
+        total: z.number(),
+        rate: z.number(),
+        unmatchedSample: z.array(z.string()),
+      })
+      .nullable(),
+    teamCodeMissing: z.number(),
     message: z.string(),
   }),
 
@@ -215,6 +228,34 @@ export default api({
       }
     }
 
+    // ── Roster match check (current season only) ──
+    // Guards against a format change silently breaking name matching and
+    // wiping good data (every rostered player would show DNP).
+    const teamCodeMissing = rows.filter((r) => !r.team).length;
+    let rosterMatch: { matched: number; total: number; rate: number; unmatchedSample: string[] } | null = null;
+    if (season === CURRENT_SEASON) {
+      const rostered = await ctx.integrations.apps_db.query(
+        `SELECT name FROM ffwr_players
+         WHERE (roster_team_id IS NOT NULL OR drafted_team_id IS NOT NULL)
+           AND position IN ('QB','RB','WR','TE')
+         LIMIT 500`,
+        z.object({ name: z.string() }),
+        undefined,
+        { label: "Load rostered players for match check" },
+      );
+      const fileNames = new Set(rows.map((r) => rosterMatchKey(r.name)));
+      const unmatched = rostered.filter((p) => !fileNames.has(rosterMatchKey(p.name))).map((p) => p.name);
+      const total = rostered.length;
+      const matched = total - unmatched.length;
+      rosterMatch = {
+        matched,
+        total,
+        rate: total > 0 ? matched / total : 1,
+        unmatchedSample: unmatched.slice(0, 10),
+      };
+      ctx.log.info(`Roster match: ${matched}/${total}`);
+    }
+
     const sampleRows = rows.slice(0, 5).map((r) => ({
       rank: r.rank,
       name: r.name,
@@ -244,11 +285,21 @@ export default api({
         weeksDetected: numWeeks,
         seasonAlreadyLoaded,
         existingRowCount,
+        rosterMatch,
+        teamCodeMissing,
         message: `Preview: ${rows.length} players parsed for ${season} (${numWeeks} week columns detected). ${skippedKDst} K/DST skipped. ${validationIssues.length} issues. Ready to seed.`,
       };
     }
 
     // --- Commit mode ---
+
+    if (rosterMatch && rosterMatch.total > 0 && rosterMatch.rate < MIN_ROSTER_MATCH_RATE) {
+      throw new Error(
+        `Only ${rosterMatch.matched} of ${rosterMatch.total} rostered players matched names in this file ` +
+        `(need ${Math.round(MIN_ROSTER_MATCH_RATE * 100)}%). The CSV format may have changed — ` +
+        `existing data was left untouched. Unmatched examples: ${rosterMatch.unmatchedSample.slice(0, 5).join(", ")}`,
+      );
+    }
 
     // Clear existing data if replacing
     if (seasonAlreadyLoaded && forceReplace) {
@@ -340,6 +391,8 @@ export default api({
       weeksDetected: numWeeks,
       seasonAlreadyLoaded,
       existingRowCount,
+      rosterMatch,
+      teamCodeMissing,
       message: `Seeded ${totalInserted} players for season ${season} with ${numWeeks} weeks of data (skipped ${skippedKDst} K/DST).`,
     };
   },
