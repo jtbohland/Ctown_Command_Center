@@ -1,6 +1,7 @@
 import InitDatabase from './draft/init-database.js';
 import GetPlayers from './draft/get-players.js';
 import GetTeams from './draft/get-teams.js';
+import UpdateTeam from './draft/update-team.js';
 import GetDraftPicks from './draft/get-draft-picks.js';
 import DraftPlayer from './draft/draft-player.js';
 import UndoDraftPick from './draft/undo-draft-pick.js';
@@ -62,6 +63,7 @@ const apis = {
   InitDatabase,
   GetPlayers,
   GetTeams,
+  UpdateTeam,
   GetDraftPicks,
   DraftPlayer,
   UndoDraftPick,

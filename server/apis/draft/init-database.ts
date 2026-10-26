@@ -114,6 +114,7 @@ export default api({
     await ctx.integrations.apps_db.execute(
       `DO $$ BEGIN
         ALTER TABLE ffwr_teams ADD COLUMN IF NOT EXISTS championships INT NOT NULL DEFAULT 0;
+        ALTER TABLE ffwr_teams ADD COLUMN IF NOT EXISTS emoji TEXT;
       EXCEPTION WHEN duplicate_column THEN NULL;
       END $$`,
       undefined,
@@ -134,17 +135,17 @@ export default api({
 
     // ── 3. Seed 11 real teams ─────────────────────────────────────────
     const teams = [
-      { name: "Crabcakes & Football", manager: "JT", color: "#D64830", isMyTeam: true, pos: 1 },
-      { name: "Boston TD Party", manager: "Tyler", color: "#A0522D", isMyTeam: false, pos: 2 },
-      { name: "Davis D", manager: "Brooke", color: "#7B2D8E", isMyTeam: false, pos: 3 },
-      { name: "Gym Rats", manager: "Carson", color: "#2E8B57", isMyTeam: false, pos: 4 },
-      { name: "Drews Cruise", manager: "AJ", color: "#1E90FF", isMyTeam: false, pos: 5 },
-      { name: "Rat Pack", manager: "Adam", color: "#E87BA4", isMyTeam: false, pos: 6 },
-      { name: "Rush Hour", manager: "Drew", color: "#E8650A", isMyTeam: false, pos: 7 },
-      { name: "Teal Titans", manager: "Erik", color: "#00B4A0", isMyTeam: false, pos: 8 },
-      { name: "The McCartel", manager: "Jimmy", color: "#C7345B", isMyTeam: false, pos: 9 },
-      { name: "The Smith Football Team", manager: "Chuck", color: "#6B7B82", isMyTeam: false, pos: 10 },
-      { name: "You Know 12 Out Here!", manager: "Jordan", color: "#1E3A8A", isMyTeam: false, pos: 11 },
+      { name: "Crabcakes & Football", manager: "JT", color: "#D64830", isMyTeam: true, pos: 1, emoji: "🦀" },
+      { name: "Boston TD Party", manager: "Tyler", color: "#A0522D", isMyTeam: false, pos: 2, emoji: "🫖" },
+      { name: "Davis D", manager: "Brooke", color: "#7B2D8E", isMyTeam: false, pos: 3, emoji: "🍆" },
+      { name: "Gym Rats", manager: "Carson", color: "#2E8B57", isMyTeam: false, pos: 4, emoji: "🏋🏻‍♂️" },
+      { name: "Drews Cruise", manager: "AJ", color: "#1E90FF", isMyTeam: false, pos: 5, emoji: "🛳️" },
+      { name: "Rat Pack", manager: "Adam", color: "#E87BA4", isMyTeam: false, pos: 6, emoji: "🐀" },
+      { name: "Rush Hour", manager: "Drew", color: "#E8650A", isMyTeam: false, pos: 7, emoji: "🐲" },
+      { name: "Teal Titans", manager: "Erik", color: "#00B4A0", isMyTeam: false, pos: 8, emoji: "🚙" },
+      { name: "The McCartel", manager: "Jimmy", color: "#C7345B", isMyTeam: false, pos: 9, emoji: "🪇" },
+      { name: "The Smith Football Team", manager: "Chuck", color: "#6B7B82", isMyTeam: false, pos: 10, emoji: "🚬" },
+      { name: "Too Weird To Live...", manager: "Jordan", color: "#1E3A8A", isMyTeam: false, pos: 11, emoji: "🃏" },
     ];
 
     // Batch team insert (1 query instead of 11)
@@ -152,12 +153,12 @@ export default api({
     const teamParams: (string | number | boolean)[] = [];
     let tIdx = 1;
     for (const t of teams) {
-      teamValRows.push(`($${tIdx}, $${tIdx + 1}, $${tIdx + 2}, $${tIdx + 3}, $${tIdx + 4})`);
-      teamParams.push(t.name, t.manager, t.color, t.pos, t.isMyTeam);
-      tIdx += 5;
+      teamValRows.push(`($${tIdx}, $${tIdx + 1}, $${tIdx + 2}, $${tIdx + 3}, $${tIdx + 4}, $${tIdx + 5})`);
+      teamParams.push(t.name, t.manager, t.color, t.pos, t.isMyTeam, t.emoji);
+      tIdx += 6;
     }
     await ctx.integrations.apps_db.execute(
-      `INSERT INTO ffwr_teams (team_name, manager_name, color, draft_position, is_my_team)
+      `INSERT INTO ffwr_teams (team_name, manager_name, color, draft_position, is_my_team, emoji)
        VALUES ${teamValRows.join(", ")}`,
       teamParams,
       { label: "Seed all 11 teams (batched)" }

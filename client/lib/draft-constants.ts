@@ -120,6 +120,8 @@ export type DraftPick = {
 };
 
 // Team Emojis — app-wide display
+// Fallback keyword map. Used before team data loads and for historical records
+// that keep a team's old name (e.g. "You Know 12 Out Here!" → 🚔).
 export const TEAM_EMOJIS: Record<string, string> = {
   "Crabcakes": "🦀",
   "Boston": "🫖",
@@ -131,10 +133,25 @@ export const TEAM_EMOJIS: Record<string, string> = {
   "Gym": "🏋🏻‍♂️",
   "McCartel": "🪇",
   "You Know": "🚔",
+  "Too Weird": "🃏",
   "Teal": "🚙",
 };
 
+// Live registry: exact team name (lowercased) → emoji from ffwr_teams.emoji.
+// Populated by TeamEmojiSync (App.tsx) from GetTeams, so Settings edits apply app-wide.
+const liveTeamEmojis = new Map<string, string>();
+
+export function registerTeamEmojis(teams: ReadonlyArray<{ team_name: string; emoji: string | null }>): void {
+  liveTeamEmojis.clear();
+  for (const t of teams) {
+    if (t.emoji) liveTeamEmojis.set(t.team_name.trim().toLowerCase(), t.emoji);
+  }
+}
+
 export function getTeamEmoji(teamName: string): string {
+  if (!teamName) return "🏈";
+  const live = liveTeamEmojis.get(teamName.trim().toLowerCase());
+  if (live) return live;
   for (const [key, emoji] of Object.entries(TEAM_EMOJIS)) {
     if (teamName.includes(key)) return emoji;
   }
@@ -512,5 +529,5 @@ export const TEAMS_DATA = [
   { name: "Teal Titans", manager: "Erik", color: "#00B4A0" },
   { name: "The McCartel", manager: "Jimmy", color: "#C7345B" },
   { name: "The Smith Football Team", manager: "Chuck", color: "#6B7B82" },
-  { name: "You Know 12 Out Here!", manager: "Jordan", color: "#1E3A8A" },
+  { name: "Too Weird To Live...", manager: "Jordan", color: "#1E3A8A" },
 ] as const;

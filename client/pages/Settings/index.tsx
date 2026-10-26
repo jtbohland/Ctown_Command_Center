@@ -14,6 +14,18 @@ import PositionBadge from "@/components/draft/PositionBadge";
 import { getTeamEmoji } from "@/lib/draft-constants";
 import ctownReduxLogo from "@/public/logos/ctown-redux.png";
 import LeagueOfRecord from "@/components/settings/LeagueOfRecord";
+import TeamCard from "@/components/settings/TeamCard";
+
+// APIs that return team names — refreshed after a team is renamed
+const TEAM_DEPENDENT_APIS = [
+  "GetTeams",
+  "GetPlayers",
+  "GetDraftPicks",
+  "GetTradeData",
+  "GetRosterData",
+  "GetRosterGrades",
+  "GetWaiverTransactions",
+] as const;
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -22,6 +34,8 @@ export default function SettingsPage() {
   const { run: uploadPlayers, loading: uploading } = useApi("UploadPlayers");
   const { run: initDb, loading: initLoading } = useApi("InitDatabase");
   const { run: manageKeepers, loading: keeperLoading } = useApi("ManageKeepers");
+  const { run: updateTeam } = useApi("UpdateTeam");
+  const [savingTeamId, setSavingTeamId] = useState<number | null>(null);
 
   const teams = teamsData?.teams ?? [];
   const players = playersData?.players ?? [];
@@ -70,6 +84,40 @@ export default function SettingsPage() {
       toast.error("Upload failed: " + message);
     }
   }, [selectedFile, uploadPlayers, uploadMode]);
+
+  const handleSaveTeam = useCallback(
+    async (teamId: number, teamName: string, emoji: string): Promise<boolean> => {
+      const cacheKey = queryClient.buildCacheKey("GetTeams", {});
+      const previous = queryClient.getQueryData(cacheKey) as typeof teamsData;
+      // Optimistic update so the card reflects the edit immediately
+      if (previous) {
+        queryClient.setQueryData(cacheKey, {
+          ...previous,
+          teams: previous.teams.map((t) =>
+            t.id === teamId ? { ...t, team_name: teamName, emoji: emoji || null } : t,
+          ),
+        });
+      }
+      setSavingTeamId(teamId);
+      try {
+        await updateTeam({ teamId, teamName, emoji: emoji || null });
+        await Promise.all(TEAM_DEPENDENT_APIS.map((name) => queryClient.invalidateQueries(name)));
+        toast.success(`Saved ${emoji ? emoji + " " : ""}${teamName}`);
+        return true;
+      } catch (error) {
+        queryClient.setQueryData(cacheKey, previous);
+        const message =
+          error && typeof error === "object" && "message" in error
+            ? String((error as { message: unknown }).message)
+            : String(error);
+        toast.error("Couldn't save team: " + message);
+        return false;
+      } finally {
+        setSavingTeamId(null);
+      }
+    },
+    [updateTeam],
+  );
 
   const handleInit = useCallback(async () => {
     try {
@@ -255,7 +303,7 @@ export default function SettingsPage() {
           <CardHeader>
             <CardTitle className="text-base">League Teams ({teams.length})</CardTitle>
             <CardDescription>
-              Your 11-team dynasty league. Share your real team info to customize.
+              Your 11-team dynasty league. Click the pencil to edit a team's name or emoji — changes apply app-wide.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -270,29 +318,12 @@ export default function SettingsPage() {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {teams.map((team) => (
-                  <div
+                  <TeamCard
                     key={team.id}
-                    className="flex items-center gap-3 rounded-lg border px-3 py-2"
-                  >
-                    <span
-                      className="w-4 h-4 rounded-full ring-1 ring-white/20 shrink-0"
-                      style={{ backgroundColor: team.color }}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate">
-                        {getTeamEmoji(team.team_name)} {team.team_name}
-                        {team.is_my_team && (
-                          <span className="ml-1.5 text-[10px] text-primary font-bold">(YOU)</span>
-                        )}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground">
-                        {team.manager_name}
-                        {team.championships > 0 && (
-                          <span className="ml-1.5">{"🏆".repeat(team.championships)}</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                    team={team}
+                    saving={savingTeamId === team.id}
+                    onSave={handleSaveTeam}
+                  />
                 ))}
               </div>
             )}

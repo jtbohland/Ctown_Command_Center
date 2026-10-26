@@ -12,6 +12,7 @@ const TeamSchema = z.object({
   draft_position: z.coerce.number().nullable(),
   is_my_team: z.coerce.boolean(),
   championships: z.coerce.number(),
+  emoji: z.string().nullable(),
 });
 
 export default api({
@@ -30,7 +31,7 @@ export default api({
 
   async run(ctx) {
     const teams = await ctx.integrations.apps_db.query(
-      "SELECT id, team_name, manager_name, color, secondary_color, logo_url, draft_position, CASE WHEN is_my_team THEN true ELSE false END as is_my_team, COALESCE(championships, 0) as championships FROM ffwr_teams ORDER BY draft_position",
+      "SELECT id, team_name, manager_name, color, secondary_color, logo_url, draft_position, CASE WHEN is_my_team THEN true ELSE false END as is_my_team, COALESCE(championships, 0) as championships, emoji FROM ffwr_teams ORDER BY draft_position",
       TeamSchema,
       undefined,
       { label: "Fetch all teams" }
